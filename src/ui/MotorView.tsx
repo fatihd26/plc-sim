@@ -1,11 +1,13 @@
-import type { SimSnapshot } from '../sim/simulation';
+import type { ComponentState } from '../sim/simulation';
 
-/** Motor M1: dönen fan kanatları ve mil işaretiyle basit animasyon. */
-export function MotorView({ motor }: { motor: SimSnapshot['M1'] }) {
-  const cls = motor.powered ? 'motor powered' : motor.running ? 'motor coasting' : 'motor';
+type MotorState = Extract<ComponentState, { type: 'motor3' }>;
+
+/** Motor: dönen fan kanatları ve mil işaretiyle basit animasyon. */
+export function MotorView({ motor, name }: { motor: MotorState; name: string }) {
+  const cls = motor.powered ? 'motor-view powered' : motor.running ? 'motor-view coasting' : 'motor-view';
   return (
     <div className={cls}>
-      <svg viewBox="0 0 240 160" width="100%" role="img" aria-label="Motor M1">
+      <svg viewBox="0 0 240 160" width="100%" role="img" aria-label={`Motor ${name}`}>
         {/* gövde */}
         <rect x="40" y="35" width="120" height="90" rx="10" className="motor-body" />
         {[50, 65, 80, 95, 110].map((y) => (
@@ -13,7 +15,7 @@ export function MotorView({ motor }: { motor: SimSnapshot['M1'] }) {
         ))}
         <rect x="70" y="125" width="60" height="12" className="motor-foot" />
         <text x="100" y="28" className="motor-name">
-          M1 3~
+          {name} 3~
         </text>
         {/* mil ve kaplin diski */}
         <rect x="160" y="74" width="30" height="12" className="shaft" />

@@ -106,14 +106,16 @@ export interface MotorParams {
 
 /**
  * 3~ asenkron motor, mekanik/elektriksel olarak basitleştirilmiş.
- * Hız birinci dereceden yaklaşır; akım hıza göre kalkış akımından nominale iner.
+ * Hız birinci dereceden yaklaşır; akım kaymaya göre kalkış akımından nominale iner.
+ * Faz sırası dönüş yönünü belirler (direction = +1 / −1).
  */
 export class Motor {
-  /** Nominal hıza oranla hız, 0..1. */
+  /** Nominal hıza oranla işaretli hız, −1..1. */
   speed = 0;
   currentA = 0;
   powered = false;
-  /** Animasyon için mil açısı [derece]. */
+  direction: 1 | -1 = 1;
+  /** Animasyon için mil açısı [derece], 0..360. */
   angleDeg = 0;
 
   constructor(
@@ -126,18 +128,21 @@ export class Motor {
     },
   ) {}
 
-  update(powered: boolean, dtMs: number): void {
+  update(powered: boolean, dtMs: number, direction: 1 | -1 = 1): void {
     const p = this.params;
     this.powered = powered;
-    const target = powered ? 1 : 0;
+    if (powered) this.direction = direction;
+    const target = powered ? direction : 0;
     const tau = powered ? p.startTauMs : p.coastTauMs;
     this.speed += ((target - this.speed) * dtMs) / tau;
-    if (!powered && this.speed < 1e-4) this.speed = 0;
+    if (!powered && Math.abs(this.speed) < 1e-4) this.speed = 0;
 
-    this.currentA = powered ? p.ratedCurrentA * (1 + (p.lockedRotorRatio - 1) * (1 - this.speed)) : 0;
+    // Kayma: 0 (senkron) .. 1 (duruş) .. 2 (ters yönde dönerken frenleme); akım 1'de doyar.
+    const slip = Math.min(1, Math.max(0, 1 - this.speed * direction));
+    this.currentA = powered ? p.ratedCurrentA * (1 + (p.lockedRotorRatio - 1) * slip) : 0;
 
     const degPerMs = (this.speed * p.ratedRpm * 360) / 60_000;
-    this.angleDeg = (this.angleDeg + degPerMs * dtMs) % 360;
+    this.angleDeg = (((this.angleDeg + degPerMs * dtMs) % 360) + 360) % 360;
   }
 
   get rpm(): number {
@@ -145,6 +150,6 @@ export class Motor {
   }
 
   get running(): boolean {
-    return this.speed > 0;
+    return this.speed !== 0;
   }
 }

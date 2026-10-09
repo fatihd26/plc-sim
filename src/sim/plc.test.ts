@@ -61,3 +61,16 @@ describe('PLC scan-cycle', () => {
     expect(plc.lastTrace['c1']?.powerOut).toBe(true);
   });
 });
+
+describe('PLC besleme', () => {
+  it('powerOff çıkışları ve process image\'ı sıfırlar', () => {
+    const plc = new Plc(program);
+    plc.diTerminals[0] = true;
+    plc.scan();
+    expect(plc.dqTerminals[0]).toBe(true);
+    plc.powerOff();
+    expect(plc.dqTerminals[0]).toBe(false);
+    expect(plc.readBit(parseAddress('%Q0.0'))).toBe(false);
+    expect(plc.diTerminals[0]).toBe(false);
+  });
+});

@@ -44,6 +44,14 @@ export class Plc {
     this.scanCount++;
   }
 
+  /** Besleme kesildi: kalıcı olmayan bellek ve çıkışlar sıfırlanır. */
+  powerOff(): void {
+    for (const area of ['I', 'Q', 'M'] as const) this.image[area].fill(false);
+    this.diTerminals.fill(false);
+    this.dqTerminals.fill(false);
+    this.trace = {};
+  }
+
   readBit(addr: BitAddress): boolean {
     return this.image[addr.area][bitIndex(addr)]!;
   }

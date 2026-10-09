@@ -119,3 +119,23 @@ describe('Motor', () => {
     });
   });
 });
+
+describe('Motor yön', () => {
+  it('ters faz sırasında ters yönde döner', () => {
+    const m = new Motor();
+    runMs(3000, () => m.update(true, 1, -1));
+    expect(m.speed).toBeLessThan(-0.99);
+    expect(m.rpm).toBeLessThan(-1430);
+    expect(m.currentA).toBeLessThan(4 * 1.05);
+    expect(m.angleDeg).toBeGreaterThanOrEqual(0);
+  });
+
+  it('dönerken yön değişince kalkış akımı çeker ve yön değiştirir', () => {
+    const m = new Motor();
+    runMs(3000, () => m.update(true, 1, 1));
+    m.update(true, 1, -1);
+    expect(m.currentA).toBeCloseTo(4 * 6, 0);
+    runMs(5000, () => m.update(true, 1, -1));
+    expect(m.speed).toBeLessThan(-0.99);
+  });
+});
