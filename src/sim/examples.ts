@@ -1,5 +1,6 @@
+import type { ContactType, LadderNode, LadderProgram, Network } from './ladder';
 import { startStopProgram } from './programs';
-import type { Schematic, Wire } from './schematic';
+import type { ComponentInstance, Schematic, Wire } from './schematic';
 
 let n = 0;
 const w = (a: string, b: string): Wire => {
@@ -56,3 +57,281 @@ export function startStopSchematic(): Schematic {
     ],
   };
 }
+
+// --- Mekanik alıştırmalar --------------------------------------------------------------------
+
+let k = 0;
+const contact = (address: string, label: string, type: ContactType = 'NO'): LadderNode => ({
+  kind: 'contact',
+  id: `c${++k}`,
+  address,
+  contact: type,
+  label,
+});
+const series = (...items: LadderNode[]): LadderNode => ({ kind: 'series', id: `s${++k}`, items });
+const parallel = (...branches: LadderNode[]): LadderNode => ({ kind: 'parallel', id: `p${++k}`, branches });
+const network = (id: string, title: string, logic: LadderNode, coil: string, label: string): Network => ({
+  id,
+  title,
+  logic,
+  coil: { id: `${id}.coil`, address: coil, label },
+});
+
+interface Part {
+  components: ComponentInstance[];
+  wires: Wire[];
+}
+
+/** G1 24 V, start (S1 NO → I0.0), stop (S2 NC → I0.1) ve programı verilen PLC. */
+function controlPanel(x: number, program: LadderProgram): Part {
+  return {
+    components: [
+      { id: 'G1', type: 'psu24', name: 'G1', x, y: 20, rotation: 0 },
+      { id: 'S1', type: 'buttonNO', name: 'S1', x: x + 80, y: 140, rotation: 0 },
+      { id: 'S2', type: 'buttonNC', name: 'S2', x: x + 160, y: 140, rotation: 0 },
+      { id: 'A1', type: 'plc', name: 'A1', x: x + 40, y: 280, rotation: 0, program },
+    ],
+    wires: [
+      w('G1:L+', 'A1:L+'),
+      w('G1:M', 'A1:M'),
+      w('G1:L+', 'S1:13'),
+      w('S1:13', 'S2:11'),
+      w('S1:14', 'A1:I0.0'),
+      w('S2:12', 'A1:I0.1'),
+    ],
+  };
+}
+
+/** Şebeke → K1 → F2 termik → 3~ yük; K1 bobini Q0.0'dan, F2 95-96 I0.2'ye. */
+function motorPower(load: ComponentInstance): Part {
+  const id = load.id;
+  return {
+    components: [
+      { id: 'X1', type: 'mains3', name: 'X1', x: 40, y: 40, rotation: 0 },
+      { id: 'K1', type: 'contactor', name: 'K1', x: 40, y: 160, rotation: 0 },
+      { id: 'F2', type: 'thermal', name: 'F2', x: 40, y: 300, rotation: 0 },
+      load,
+    ],
+    wires: [
+      w('X1:L1', 'K1:1'),
+      w('X1:L2', 'K1:3'),
+      w('X1:L3', 'K1:5'),
+      w('K1:2', 'F2:1'),
+      w('K1:4', 'F2:3'),
+      w('K1:6', 'F2:5'),
+      w('F2:2', `${id}:U`),
+      w('F2:4', `${id}:V`),
+      w('F2:6', `${id}:W`),
+      w('G1:L+', 'F2:95'),
+      w('F2:96', 'A1:I0.2'),
+      w('A1:Q0.0', 'K1:A1'),
+      w('K1:A2', 'G1:M'),
+    ],
+  };
+}
+
+const merge = (...parts: Part[]): Part => ({
+  components: parts.flatMap((p) => p.components),
+  wires: parts.flatMap((p) => p.wires),
+});
+
+/** Start ile mühürlenen, stop ile bırakılan çıkış: (I0.0 | Q) & I0.1 & ek koşullar. */
+const startStopLogic = (q: string, ...more: LadderNode[]) =>
+  series(parallel(contact('%I0.0', 'Start'), contact(q, 'Mühür')), contact('%I0.1', 'Stop'), ...more);
+
+const begin = () => {
+  n = 0;
+  k = 0;
+};
+
+/** 24 V DC fan doğrudan PLC çıkışından: en basit start-stop. */
+export function fanSchematic(): Schematic {
+  begin();
+  const program: LadderProgram = {
+    networks: [network('N1', 'Fan E1 start-stop (mühürleme)', startStopLogic('%Q0.0'), '%Q0.0', 'Fan')],
+  };
+  return {
+    version: 2,
+    title: 'Fan: PLC çıkışından start-stop',
+    pages: [{ id: 'p1', title: 'Kumanda' }],
+    ...merge(controlPanel(40, program), {
+      components: [{ id: 'E1', type: 'fan', name: 'E1', x: 120, y: 460, rotation: 0, params: { voltage: '24DC' } }],
+      wires: [w('A1:Q0.0', 'E1:X1'), w('E1:X2', 'G1:M')],
+    }),
+  };
+}
+
+/**
+ * Pnömatik piston, tek çevrim: start'a basınca ileri gider, ileri uç sensörü (I0.2) gelince
+ * mühür bırakır ve piston geri döner. Geri sensörü I0.3'e bağlı (alıştırma için).
+ */
+export function pistonSchematic(): Schematic {
+  begin();
+  const program: LadderProgram = {
+    networks: [
+      network(
+        'N1',
+        'Piston ileri; ileri sensörü gelince geri dön',
+        startStopLogic('%Q0.0', contact('%I0.2', 'İleri sensörü', 'NC')),
+        '%Q0.0',
+        'Valf',
+      ),
+    ],
+  };
+  return {
+    version: 2,
+    title: 'Pnömatik piston: tek çevrim',
+    pages: [{ id: 'p1', title: 'Kumanda' }],
+    ...merge(controlPanel(40, program), {
+      components: [
+        { id: 'Y1', type: 'cylinder', name: 'Y1', x: 60, y: 460, rotation: 0, params: { extendMs: 1500, retractMs: 1000 } },
+      ],
+      wires: [
+        w('A1:Q0.0', 'Y1:A1'),
+        w('Y1:A2', 'G1:M'),
+        w('G1:L+', 'Y1:23'),
+        w('Y1:24', 'A1:I0.2'),
+        w('G1:L+', 'Y1:13'),
+        w('Y1:14', 'A1:I0.3'),
+      ],
+    }),
+  };
+}
+
+/**
+ * Konveyör: bant çalışırken kutu fotosele (I0.3) gelince durur ve P1 yanar. Start'a basılınca
+ * kutu gönderilir; kutu fotoseli geçince mühür bandı tekrar tutar.
+ */
+export function conveyorSchematic(): Schematic {
+  begin();
+  const program: LadderProgram = {
+    networks: [
+      network(
+        'N1',
+        'Bant: kutu fotosele gelince dur',
+        series(
+          parallel(contact('%I0.0', 'Start'), series(contact('%Q0.0', 'Mühür'), contact('%I0.3', 'Fotosel', 'NC'))),
+          contact('%I0.1', 'Stop'),
+          contact('%I0.2', 'Termik'),
+        ),
+        '%Q0.0',
+        'Bant',
+      ),
+      network('N2', 'Kutu bekliyor lambası', contact('%I0.3', 'Fotosel'), '%Q0.1', 'Kutu bekliyor'),
+    ],
+  };
+  const conveyor: ComponentInstance = {
+    id: 'M1',
+    type: 'conveyor',
+    name: 'M1',
+    x: 40,
+    y: 440,
+    rotation: 0,
+    params: { transitS: 8, feedS: 3 },
+  };
+  return {
+    version: 2,
+    title: 'Konveyör: kutu fotosele gelince dur',
+    pages: [{ id: 'p1', title: 'Güç ve kumanda devresi' }],
+    ...merge(controlPanel(360, program), motorPower(conveyor), {
+      components: [{ id: 'P1', type: 'lamp', name: 'P1', x: 460, y: 460, rotation: 0, params: { color: 'yellow' } }],
+      wires: [w('G1:L+', 'M1:13'), w('M1:14', 'A1:I0.3'), w('A1:Q0.1', 'P1:X1'), w('P1:X2', 'G1:M')],
+    }),
+  };
+}
+
+/**
+ * Depo seviye kontrolü: start ile otomatik moda geçilir (Q0.2). Otomatikte su alt sensörün (I0.3)
+ * altına inince pompa çalışır, üst sensöre (I0.4) ulaşınca durur. Depo doluyken P1 yanar.
+ */
+export function tankSchematic(): Schematic {
+  begin();
+  const program: LadderProgram = {
+    networks: [
+      network('N1', 'Otomatik mod (start-stop)', startStopLogic('%Q0.2'), '%Q0.2', 'Otomatik'),
+      network(
+        'N2',
+        'Pompa: alt seviyede başla, üst seviyede dur',
+        series(
+          contact('%Q0.2', 'Otomatik'),
+          parallel(contact('%I0.3', 'Alt seviye', 'NC'), contact('%Q0.0', 'Mühür')),
+          contact('%I0.4', 'Üst seviye', 'NC'),
+          contact('%I0.2', 'Termik'),
+        ),
+        '%Q0.0',
+        'Pompa',
+      ),
+      network('N3', 'Depo dolu lambası', contact('%I0.4', 'Üst seviye'), '%Q0.1', 'Depo dolu'),
+    ],
+  };
+  const pump: ComponentInstance = {
+    id: 'M1',
+    type: 'pump',
+    name: 'M1',
+    x: 40,
+    y: 440,
+    rotation: 0,
+    params: { fillS: 15, drainS: 40, initialPct: 30 },
+  };
+  return {
+    version: 2,
+    title: 'Depo seviye kontrolü',
+    pages: [{ id: 'p1', title: 'Güç ve kumanda devresi' }],
+    ...merge(controlPanel(360, program), motorPower(pump), {
+      components: [{ id: 'P1', type: 'lamp', name: 'P1', x: 460, y: 460, rotation: 0, params: { color: 'yellow' } }],
+      wires: [
+        w('G1:L+', 'M1:13'),
+        w('M1:14', 'A1:I0.3'),
+        w('G1:L+', 'M1:23'),
+        w('M1:24', 'A1:I0.4'),
+        w('A1:Q0.1', 'P1:X1'),
+        w('P1:X2', 'G1:M'),
+      ],
+    }),
+  };
+}
+
+export interface Example {
+  id: string;
+  title: string;
+  /** Ne öğrettiği ve önerilen alıştırma. */
+  description: string;
+  build(): Schematic;
+}
+
+/** "Örnek" menüsü; kolaydan zora. */
+export const EXAMPLES: Example[] = [
+  {
+    id: 'fan',
+    title: 'Fan: start-stop',
+    description: 'PLC çıkışı 24 V DC fanı doğrudan sürer; mühürleme mantığı. Alıştırma: ikinci bir fan ekleyin.',
+    build: fanSchematic,
+  },
+  {
+    id: 'start-stop',
+    title: 'Motor: start-stop',
+    description: 'Kontaktör ve termik röleyle 3~ motor. Alıştırma: "motor çalışıyor" lambası ekleyin.',
+    build: startStopSchematic,
+  },
+  {
+    id: 'piston',
+    title: 'Pnömatik piston: tek çevrim',
+    description:
+      "İleri uç sensörü pistonu geri döndürür. Alıştırma: geri sensörünü (I0.3) kullanarak stop'a basılana kadar sürekli ileri-geri çalıştırın.",
+    build: pistonSchematic,
+  },
+  {
+    id: 'conveyor',
+    title: 'Konveyör: fotoselde dur',
+    description:
+      'Kutu fotosele gelince bant durur, start kutuyu gönderir. Alıştırma: bant çalışırken yanan yeşil bir "Bant çalışıyor" lambası (Q0.2) ekleyin.',
+    build: conveyorSchematic,
+  },
+  {
+    id: 'tank',
+    title: 'Depo seviye kontrolü',
+    description:
+      'Otomatik modda alt seviyede pompa başlar, üst seviyede durur. Alıştırma: alt sensör kuruyken alarm lambası yakın.',
+    build: tankSchematic,
+  },
+];

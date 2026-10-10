@@ -3,7 +3,7 @@
 // iki mod vardır.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
-import { startStopSchematic } from '../sim/examples';
+import { EXAMPLES, type Example } from '../sim/examples';
 import type { LadderProgram } from '../sim/ladder';
 import { startStopProgram } from '../sim/programs';
 import { emptySchematic, pagesOf, pageOf, type Schematic } from '../sim/schematic';
@@ -277,7 +277,7 @@ export function App() {
       <div className="ribbon" role="toolbar" aria-label="Komutlar">
         <Group label="Dosya">
           <Tool icon="🗋" label="Yeni" disabled={!edit} onClick={() => loadNew(emptySchematic(), 'Yeni proje')} />
-          <Tool icon="⚡" label="Örnek" disabled={!edit} onClick={() => loadNew(startStopSchematic(), 'Start-stop örneği yüklendi')} />
+          <ExamplesMenu disabled={!edit} onPick={(e) => loadNew(e.build(), `Örnek yüklendi: ${e.title}`)} />
           <Tool icon="📂" label="Aç" disabled={!edit} onClick={() => fileRef.current?.click()} />
           <Tool icon="💾" label="Kaydet" onClick={() => downloadSchematic(schematic)} />
           <input
@@ -523,6 +523,54 @@ function Group({ label, children }: { label: string; children: ReactNode }) {
     <div className="ribbon-group" role="group" aria-label={label}>
       <div className="ribbon-tools">{children}</div>
       <div className="ribbon-label">{label}</div>
+    </div>
+  );
+}
+
+/** Örnek şemalar menüsü. Araç çubuğu kaydırılabildiği için liste sabit konumda açılır. */
+function ExamplesMenu({ disabled, onPick }: { disabled: boolean; onPick(e: Example): void }) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  useEffect(() => {
+    if (!at) return;
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setAt(null);
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [at]);
+  return (
+    <div ref={ref}>
+      <Tool
+        icon="⚡"
+        label="Örnek ▾"
+        disabled={disabled}
+        active={!!at}
+        onClick={() => {
+          const r = ref.current!.getBoundingClientRect();
+          setAt(at ? null : { x: r.left, y: r.bottom + 4 });
+        }}
+      />
+      {at && (
+        <>
+          <div className="menu-backdrop" onClick={() => setAt(null)} />
+          <ul className="menu" role="menu" style={{ left: at.x, top: at.y }}>
+            {EXAMPLES.map((e) => (
+              <li key={e.id} role="none">
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    setAt(null);
+                    onPick(e);
+                  }}
+                >
+                  <strong>{e.title}</strong>
+                  <small>{e.description}</small>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@
 
 import { describe, expect, it } from 'vitest';
 import { Conveyor, Cylinder, Tank } from './devices';
+import { conveyorSchematic, EXAMPLES, fanSchematic, pistonSchematic, tankSchematic } from './examples';
 import type { LadderProgram } from './ladder';
 import { validateSchematic, type ComponentInstance, type Schematic, type Wire } from './schematic';
 import { Simulation, type ComponentState, type SimSnapshot } from './simulation';
@@ -266,5 +267,82 @@ describe('simülasyonda mekanik elemanlar', () => {
     const f = state(sim.snapshot(), 'E1', 'fan');
     expect(f.powered).toBe(true);
     expect(f.rpm).toBeGreaterThan(1000);
+  });
+});
+
+describe('örnek şemalar', () => {
+  const press = (sim: Simulation, id: string) => {
+    sim.enqueue({ type: 'button', component: id, pressed: true });
+    sim.run(50);
+    sim.enqueue({ type: 'button', component: id, pressed: false });
+    sim.run(50);
+  };
+  /** Koşul sağlanana dek 10 ms'lik adımlarla ilerler. */
+  const until = (sim: Simulation, ms: number, cond: (s: SimSnapshot) => boolean) => {
+    for (let t = 0; t < ms; t += 10) {
+      sim.run(10);
+      if (cond(sim.snapshot())) return true;
+    }
+    return false;
+  };
+
+  it.each(EXAMPLES.map((e) => [e.id, e] as const))('%s: geçerli ve simülasyon kurulur', (_, e) => {
+    const s = e.build();
+    expect(validateSchematic(s)).toEqual([]);
+    expect(() => new Simulation(s).run(20)).not.toThrow();
+  });
+
+  it('fan: start çalıştırır, stop durdurur', () => {
+    const sim = new Simulation(fanSchematic());
+    press(sim, 'S1');
+    expect(until(sim, 3000, (s) => state(s, 'E1', 'fan').rpm > 1000)).toBe(true);
+    press(sim, 'S2');
+    expect(state(sim.snapshot(), 'E1', 'fan').powered).toBe(false);
+  });
+
+  it('piston: start ile bir kez ileri gidip geri döner', () => {
+    const sim = new Simulation(pistonSchematic());
+    sim.run(50);
+    press(sim, 'S1');
+    expect(until(sim, 3000, (s) => state(s, 'Y1', 'cylinder').extended)).toBe(true);
+    expect(until(sim, 3000, (s) => state(s, 'Y1', 'cylinder').retracted)).toBe(true);
+    sim.run(2000);
+    expect(state(sim.snapshot(), 'Y1', 'cylinder').retracted).toBe(true);
+  });
+
+  it('konveyör: kutu fotoselde bandı durdurur, start kutuyu gönderir', () => {
+    const sim = new Simulation(conveyorSchematic());
+    sim.run(50);
+    press(sim, 'S1');
+    expect(state(sim.snapshot(), 'M1', 'conveyor').powered).toBe(true);
+    expect(until(sim, 20_000, (s) => state(s, 'M1', 'conveyor').sensor)).toBe(true);
+    sim.run(200);
+    let s = sim.snapshot();
+    expect(state(s, 'M1', 'conveyor').powered).toBe(false);
+    expect(state(s, 'P1', 'lamp').lit).toBe(true);
+    // Start basılı tutulunca kutu fotoseli geçer, mühür bandı tekrar tutar
+    sim.enqueue({ type: 'button', component: 'S1', pressed: true });
+    expect(until(sim, 5000, (x) => !state(x, 'M1', 'conveyor').sensor)).toBe(true);
+    sim.enqueue({ type: 'button', component: 'S1', pressed: false });
+    sim.run(200);
+    s = sim.snapshot();
+    expect(state(s, 'M1', 'conveyor').powered).toBe(true);
+    expect(until(sim, 10_000, (x) => state(x, 'M1', 'conveyor').delivered === 1)).toBe(true);
+  });
+
+  it('depo: otomatikte seviye alt ve üst sensör arasında tutulur', () => {
+    const sim = new Simulation(tankSchematic());
+    sim.run(50);
+    press(sim, 'S1');
+    expect(until(sim, 10_000, (s) => state(s, 'M1', 'pump').powered)).toBe(true);
+    expect(state(sim.snapshot(), 'M1', 'pump').level).toBeLessThan(0.21);
+    expect(until(sim, 30_000, (s) => !state(s, 'M1', 'pump').powered)).toBe(true);
+    let s = sim.snapshot();
+    expect(state(s, 'M1', 'pump').level).toBeGreaterThan(0.79);
+    expect(state(s, 'P1', 'lamp').lit).toBe(true);
+    // Tüketimle seviye düşer, pompa yeniden çalışır; hiç taşmaz
+    expect(until(sim, 30_000, (x) => state(x, 'M1', 'pump').powered)).toBe(true);
+    s = sim.snapshot();
+    expect(s.events.some((e) => e.text.includes('taştı'))).toBe(false);
   });
 });
