@@ -112,6 +112,7 @@ export function App() {
       const st = snapshot?.components[component];
       if (st?.type === 'estop') sim.send({ type: 'button', component, pressed: !st.pressed });
       else if (st?.type === 'breaker3' || st?.type === 'fuse') sim.send({ type: 'switch', component, closed: !st.closed });
+      else if (st?.type === 'conveyor') sim.send({ type: 'addBox', component });
     },
     [snapshot, sim.send],
   );

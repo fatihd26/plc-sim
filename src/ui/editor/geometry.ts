@@ -71,6 +71,29 @@ export const GEOMETRY: Record<BuiltinType, SymbolGeo> = {
     ],
   },
   motor3: { w: 80, h: 80, terminals: [top('U', 20), top('V', 40), top('W', 60)] },
+  // Mekanik elemanlar: sensör terminalleri sensörün çizildiği yere yakın durur.
+  cylinder: {
+    w: 240,
+    h: 80,
+    terminals: [top('A1', 20), top('A2', 40), bottom('13', 70, 80), bottom('14', 90, 80), bottom('23', 120, 80), bottom('24', 140, 80)],
+  },
+  conveyor: { w: 260, h: 80, terminals: [top('U', 20), top('V', 40), top('W', 60), top('13', 200), top('14', 220)] },
+  fan: { w: 60, h: 80, terminals: [top('X1', 20), top('X2', 40)] },
+  pump: {
+    w: 200,
+    h: 140,
+    terminals: [
+      top('U', 20),
+      top('V', 40),
+      top('W', 60),
+      ...[['23', 40], ['24', 60], ['13', 100], ['14', 120]].map(([name, y]): TerminalGeo => ({
+        name: name as string,
+        x: 200,
+        y: y as number,
+        dir: 'right',
+      })),
+    ],
+  },
   plc: {
     w: 220,
     h: 100,

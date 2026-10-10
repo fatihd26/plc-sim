@@ -5,6 +5,7 @@ import { PLC_DI, PLC_DQ, strParam, type CustomDef } from '../../sim/catalog';
 import type { ComponentInstance } from '../../sim/schematic';
 import type { ComponentState } from '../../sim/simulation';
 import { geometryOf } from './geometry';
+import { ConveyorBody, CylinderBody, FanBody, PumpBody } from './mechanics';
 
 export type SymbolInstance = Pick<ComponentInstance, 'type' | 'custom' | 'params'>;
 
@@ -279,6 +280,14 @@ export function SymbolBody({ inst, state, xrefText }: BodyProps): ReactNode {
         </g>
       );
     }
+    case 'cylinder':
+      return <CylinderBody inst={inst} s={st(state, 'cylinder')} />;
+    case 'conveyor':
+      return <ConveyorBody s={st(state, 'conveyor')} />;
+    case 'fan':
+      return <FanBody inst={inst} s={st(state, 'fan')} />;
+    case 'pump':
+      return <PumpBody inst={inst} s={st(state, 'pump')} />;
     case 'custom':
       return <CustomBody def={inst.custom} state={st(state, 'custom')} w={g.w} />;
   }

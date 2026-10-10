@@ -474,6 +474,72 @@ function LiveState({
           <MotorView motor={state} name={name} />
         </Live>
       );
+    case 'cylinder':
+      return (
+        <Live>
+          <p>
+            <Lamp on={state.valve} fault={!!state.fault} /> Valf {state.fault ?? (state.valve ? 'enerjili (ileri)' : 'enerjisiz (geri)')}
+          </p>
+          <p className="mono">Konum: %{Math.round(state.position * 100)}</p>
+          <div className="heat" title="Piston konumu">
+            <div style={{ width: `${state.position * 100}%` }} />
+          </div>
+          <p>
+            <Lamp on={state.retracted} /> 13-14 geride · <Lamp on={state.extended} /> 23-24 ileride
+          </p>
+        </Live>
+      );
+    case 'conveyor':
+      return (
+        <Live>
+          <p>
+            <Lamp on={state.powered} /> {state.powered ? 'Çalışıyor' : state.speed !== 0 ? 'Yavaşlıyor' : 'Duruyor'}
+            {state.speed !== 0 && (state.direction > 0 ? ' · ileri' : ' · geri')}
+          </p>
+          <p className="mono">
+            {state.rpm.toFixed(0)} dev/dk · I = {state.currentA.toFixed(2)} A
+          </p>
+          <p>
+            <Lamp on={state.sensor} /> Fotosel 13-14 {state.sensor ? '(kutu var)' : '(boş)'}
+          </p>
+          <p>
+            Bantta {state.boxes.length} kutu · teslim edilen {state.delivered}
+          </p>
+          <button type="button" onClick={() => send({ type: 'addBox', component: id })}>
+            Kutu ekle
+          </button>
+        </Live>
+      );
+    case 'fan':
+      return (
+        <Live>
+          <p>
+            <Lamp on={state.powered} fault={!!state.fault} />{' '}
+            {state.fault ?? (state.powered ? 'Çalışıyor' : state.speed !== 0 ? 'Yavaşlıyor' : 'Duruyor')}
+          </p>
+          <p className="mono">{state.rpm.toFixed(0)} dev/dk</p>
+        </Live>
+      );
+    case 'pump':
+      return (
+        <Live>
+          <p>
+            <Lamp on={state.powered} fault={state.overflowing} />{' '}
+            {state.overflowing ? 'DEPO TAŞIYOR' : state.powered ? 'Pompa çalışıyor' : 'Pompa duruyor'}
+          </p>
+          <p className="mono">
+            {state.rpm.toFixed(0)} dev/dk · I = {state.currentA.toFixed(2)} A
+          </p>
+          <p className="mono">Seviye: %{Math.round(state.level * 100)}</p>
+          <div className="heat" title="Depo seviyesi">
+            <div style={{ width: `${state.level * 100}%` }} />
+          </div>
+          <p>
+            <Lamp on={state.low} /> 13-14 alt (%{state.lowAt * 100}) · <Lamp on={state.high} /> 23-24 üst (%
+            {state.highAt * 100})
+          </p>
+        </Live>
+      );
     case 'plc':
       return (
         <Live>

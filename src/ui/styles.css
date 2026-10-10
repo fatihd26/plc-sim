@@ -304,6 +304,36 @@ table.terms { border-collapse: collapse; width: 100%; font-size: 12px; }
 :is(.canvas .symbol, .preview) .bulb { fill: var(--sym-fill); }
 :is(.canvas .symbol, .preview) .lamp-sym.lit .bulb { fill: #facc15; stroke: #ca8a04; filter: drop-shadow(0 0 6px #facc15); }
 
+/* Mekanik elemanlar */
+:is(.canvas .symbol, .preview) .mech .coil.fault, :is(.canvas .symbol, .preview) .coil.fault { stroke: var(--fault); }
+:is(.canvas .symbol, .preview) .mech .sensor { fill: var(--sym-fill); stroke-width: 1; }
+:is(.canvas .symbol, .preview) .mech .sensor.on { fill: var(--on); stroke: var(--on); }
+:is(.canvas .symbol, .preview) .valve-pos { fill: var(--sym-fill); stroke-width: 1.2; }
+.mode-sim .canvas .symbol .valve-pos.active { fill: var(--on-soft); stroke: var(--on); }
+:is(.canvas .symbol, .preview) .hose { stroke: var(--sym-faint); stroke-width: 1.2; }
+.mode-sim .canvas .symbol .hose.live { stroke: var(--accent); stroke-width: 2; }
+:is(.canvas .symbol, .preview) .piston { fill: var(--sym); stroke: none; }
+:is(.canvas .symbol, .preview) .rod { fill: var(--sym-faint); stroke: var(--sym); stroke-width: 1; }
+:is(.canvas .symbol, .preview) .belt { fill: var(--sym-fill); }
+:is(.canvas .symbol, .preview) .belt-marks { stroke-width: 3; stroke-dasharray: 6 6; stroke-linecap: butt; }
+:is(.canvas .symbol, .preview) .crate rect { fill: #d6a35c; stroke: #8a5a1c; stroke-width: 1.2; }
+:is(.canvas .symbol, .preview) .crate-tape { stroke: #8a5a1c; stroke-width: 1; }
+:is(.canvas .symbol, .preview) .beam { stroke: var(--sym-faint); stroke-width: 1; stroke-dasharray: 2 2; }
+.mode-sim .canvas .symbol .beam { stroke: var(--fault); opacity: .7; }
+.mode-sim .canvas .symbol .beam.blocked { opacity: 1; stroke-width: 1.6; }
+:is(.canvas .symbol, .preview) .fan-blades path { fill: var(--sym-faint); stroke: var(--sym); stroke-width: 1; }
+:is(.canvas .symbol, .preview) .fan.powered .fan-blades path { fill: var(--on-soft); stroke: var(--on); }
+:is(.canvas .symbol, .preview) .fan .hub { fill: var(--sym); }
+:is(.canvas .symbol, .preview) .pipe { stroke: var(--sym-faint); stroke-width: 4; }
+:is(.canvas .symbol, .preview) .flow { stroke: transparent; stroke-width: 2; stroke-dasharray: 4 4; }
+:is(.canvas .symbol, .preview) .flow.on { stroke: #38bdf8; animation: flow .5s linear infinite; }
+.canvas-host:not(.running) .flow.on { animation-play-state: paused; }
+@keyframes flow { to { stroke-dashoffset: -8; } }
+:is(.canvas .symbol, .preview) .water { fill: #38bdf8; fill-opacity: .55; stroke: none; }
+:is(.canvas .symbol, .preview) .level-mark { stroke: var(--sym-faint); }
+:is(.canvas .symbol, .preview) .spill { stroke: #38bdf8; stroke-width: 3; }
+:is(.canvas .symbol, .preview) .pump.overflow .tank { stroke: var(--fault); }
+
 .canvas-prompt {
   position: absolute; left: 10px; bottom: 10px; padding: 5px 10px; font-size: 12px;
   background: var(--panel); border: 1px solid var(--border); border-radius: 6px; pointer-events: none;

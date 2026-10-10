@@ -18,6 +18,10 @@ export type ComponentType =
   | 'terminal'
   | 'junction'
   | 'xref'
+  | 'cylinder'
+  | 'conveyor'
+  | 'fan'
+  | 'pump'
   | 'custom';
 
 export type Category =
@@ -29,6 +33,7 @@ export type Category =
   | 'Sinyal'
   | 'Kontrol'
   | 'Bağlantı'
+  | 'Mekanik'
   | 'Kullanıcı';
 
 export const CATEGORIES: readonly Category[] = [
@@ -40,6 +45,7 @@ export const CATEGORIES: readonly Category[] = [
   'Sinyal',
   'Kontrol',
   'Bağlantı',
+  'Mekanik',
   'Kullanıcı',
 ];
 
@@ -94,13 +100,22 @@ const num = (key: string, label: string, def: number, min: number, max: number, 
   unit,
 });
 
-const voltageParam = (key: string, label: string): ParamSpec => ({
+const voltageParam = (key: string, label: string, def: Voltage = '24DC'): ParamSpec => ({
   key,
   label,
   kind: 'enum',
-  default: '24DC',
+  default: def,
   options: VOLTAGE_OPTIONS,
 });
+
+/** Mekanik elemanların tahrik motoru (3~): akım ve zaman sabitleri. */
+const driveParams = (ratedCurrentA: number, ratedRpm: number): ParamSpec[] => [
+  num('ratedCurrentA', 'Motor nominal akımı', ratedCurrentA, 0.1, 100, 0.1, 'A'),
+  num('ratedRpm', 'Motor nominal hızı', ratedRpm, 100, 3600, 10, 'dev/dk'),
+  num('lockedRotorRatio', 'Kalkış akımı / In', 6, 1, 10, 0.5),
+  num('startTauMs', 'Kalkış zaman sabiti', 400, 10, 10_000, 10, 'ms'),
+  num('coastTauMs', 'Duruş zaman sabiti', 800, 10, 60_000, 10, 'ms'),
+];
 
 export const CATALOG: Record<ComponentType, ComponentSpec> = {
   mains3: {
@@ -268,6 +283,66 @@ export const CATALOG: Record<ComponentType, ComponentSpec> = {
     description: 'Aynı etiketli tüm sayfa geçişleri elektriksel olarak bağlıdır (ör. "L+" veya "24V")',
     terminals: ['1'],
     params: [],
+  },
+  cylinder: {
+    type: 'cylinder',
+    title: 'Pnömatik silindir + valf',
+    prefix: 'Y',
+    category: 'Mekanik',
+    description:
+      'Çift etkili silindir, 5/2 yaylı selenoid valf (A1-A2). Bobin enerjiliyken ileri gider. ' +
+      'Uç sensörleri: 13-14 geride, 23-24 ileride kapanır',
+    terminals: ['A1', 'A2', '13', '14', '23', '24'],
+    params: [
+      voltageParam('coilVoltage', 'Valf bobin gerilimi'),
+      num('extendMs', 'İleri gitme süresi', 1000, 50, 20_000, 50, 'ms'),
+      num('retractMs', 'Geri dönme süresi', 1000, 50, 20_000, 50, 'ms'),
+    ],
+  },
+  conveyor: {
+    type: 'conveyor',
+    title: 'Konveyör bant',
+    prefix: 'M',
+    category: 'Mekanik',
+    description:
+      '3~ motorla (U-V-W) döner, faz sırası yönü belirler. Bant sonundaki fotosel (13-14) kutu ' +
+      'önündeyken kapanır. Simülasyonda banda tıklayınca kutu eklenir',
+    terminals: ['U', 'V', 'W', '13', '14'],
+    params: [
+      num('transitS', 'Kutunun bandı geçme süresi', 6, 1, 120, 0.5, 's'),
+      num('feedS', 'Otomatik kutu besleme aralığı (0 = kapalı)', 4, 0, 120, 0.5, 's'),
+      ...driveParams(2, 1400),
+    ],
+  },
+  fan: {
+    type: 'fan',
+    title: 'Fan',
+    prefix: 'M',
+    category: 'Mekanik',
+    description: 'Tek fazlı fan, X1-X2 arasında anma gerilimi varken döner (24 V DC / 230 V AC)',
+    terminals: ['X1', 'X2'],
+    params: [
+      voltageParam('voltage', 'Anma gerilimi', '230AC'),
+      num('ratedRpm', 'Nominal hız', 1400, 100, 3600, 10, 'dev/dk'),
+      num('startTauMs', 'Kalkış zaman sabiti', 800, 10, 10_000, 10, 'ms'),
+      num('coastTauMs', 'Duruş zaman sabiti', 2500, 10, 60_000, 10, 'ms'),
+    ],
+  },
+  pump: {
+    type: 'pump',
+    title: 'Su pompası + depo',
+    prefix: 'M',
+    category: 'Mekanik',
+    description:
+      '3~ pompa (U-V-W) depoyu doldurur, depodan sürekli su çekilir. Seviye sensörleri su ' +
+      'seviyesine ulaşınca kapanır: 13-14 alt (%20), 23-24 üst (%80)',
+    terminals: ['U', 'V', 'W', '13', '14', '23', '24'],
+    params: [
+      num('fillS', 'Boş depoyu doldurma süresi', 20, 1, 600, 1, 's'),
+      num('drainS', 'Dolu deponun boşalma süresi (0 = tüketim yok)', 40, 0, 600, 1, 's'),
+      num('initialPct', 'Başlangıç seviyesi', 10, 0, 100, 5, '%'),
+      ...driveParams(3, 2800),
+    ],
   },
   custom: {
     type: 'custom',

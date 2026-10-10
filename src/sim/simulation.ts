@@ -11,7 +11,7 @@ import {
   type CustomDef,
   type Voltage,
 } from './catalog';
-import { Contactor, Motor, PushButton, ThermalRelay } from './devices';
+import { Contactor, Conveyor, Cylinder, Motor, PushButton, Tank, ThermalRelay } from './devices';
 import type { LadderProgram, LadderTrace } from './ladder';
 import { NetSolver, type NetPotential, type NetResult, type Potential } from './netlist';
 import { Plc } from './plc';
@@ -27,7 +27,9 @@ export type SimCommand =
   | { type: 'button'; component: string; pressed: boolean }
   | { type: 'switch'; component: string; closed: boolean }
   | { type: 'thermalTest'; component: string }
-  | { type: 'thermalReset'; component: string };
+  | { type: 'thermalReset'; component: string }
+  /** Konveyörün başına kutu koy. */
+  | { type: 'addBox'; component: string };
 
 export interface LoggedCommand {
   tick: number;
@@ -92,6 +94,46 @@ export type ComponentState =
       trace: LadderTrace;
     }
   | {
+      type: 'cylinder';
+      valve: boolean;
+      /** 0 = tam geride, 1 = tam ileride. */
+      position: number;
+      retracted: boolean;
+      extended: boolean;
+      fault: string | null;
+    }
+  | {
+      type: 'conveyor';
+      powered: boolean;
+      speed: number;
+      rpm: number;
+      currentA: number;
+      direction: 1 | -1;
+      /** Kutuların sol kenar konumları (bant uzunluğuna oranla) ve kutu boyu. */
+      boxes: number[];
+      boxLength: number;
+      sensorAt: number;
+      beltPos: number;
+      sensor: boolean;
+      delivered: number;
+    }
+  | { type: 'fan'; powered: boolean; speed: number; rpm: number; angleDeg: number; fault: string | null }
+  | {
+      type: 'pump';
+      powered: boolean;
+      speed: number;
+      rpm: number;
+      currentA: number;
+      angleDeg: number;
+      /** Depo seviyesi 0..1 ve sensör eşikleri. */
+      level: number;
+      lowAt: number;
+      highAt: number;
+      low: boolean;
+      high: boolean;
+      overflowing: boolean;
+    }
+  | {
       type: 'custom';
       pressed: boolean;
       coilEnergized: boolean;
@@ -126,6 +168,10 @@ type Device =
   | { type: 'thermal'; relay: ThermalRelay; currentA: number }
   | { type: 'motor3'; motor: Motor }
   | { type: 'plc'; plc: Plc; powered: boolean; scanTimeMs: number }
+  | { type: 'cylinder'; cylinder: Cylinder; voltage: Voltage; fault: string | null }
+  | { type: 'conveyor'; motor: Motor; conveyor: Conveyor }
+  | { type: 'fan'; motor: Motor; voltage: Voltage; fault: string | null }
+  | { type: 'pump'; motor: Motor; tank: Tank }
   | {
       type: 'custom';
       def: CustomDef;
@@ -160,6 +206,23 @@ export function loadResponse(rating: Voltage, supply: Supply): { on: boolean; fa
     return { on: supply === 'DC24', fault: supply === 'AC230' || supply === 'AC400' ? 'Aşırı gerilim (AC)' : null };
   }
   return { on: supply === 'AC230', fault: supply === 'AC400' ? 'Aşırı gerilim (400 V)' : null };
+}
+
+/** U-V-W terminalli 3~ motoru olan cihazın motoru (termik akım ve faz sırası için). */
+function threePhaseMotor(d: Device): Motor | null {
+  return d.type === 'motor3' || d.type === 'conveyor' || d.type === 'pump' ? d.motor : null;
+}
+
+/** Mekanik elemanın tahrik motoru (katalogdaki driveParams). */
+function driveMotor(c: ComponentInstance): Motor {
+  return new Motor({
+    ratedCurrentA: numParam(c, 'ratedCurrentA'),
+    ratedRpm: numParam(c, 'ratedRpm'),
+    startTauMs: numParam(c, 'startTauMs'),
+    coastTauMs: numParam(c, 'coastTauMs'),
+    lockedRotorRatio: numParam(c, 'lockedRotorRatio'),
+    loadPct: 100,
+  });
 }
 
 function createDevice(c: ComponentInstance, config: SimConfig): Device {
@@ -220,6 +283,43 @@ function createDevice(c: ComponentInstance, config: SimConfig): Device {
         plc: new Plc(config.program ?? c.program ?? startStopProgram),
         powered: false,
         scanTimeMs: config.scanTimeMs ?? Math.round(numParam(c, 'scanTimeMs')),
+      };
+    case 'cylinder':
+      return {
+        type: c.type,
+        cylinder: new Cylinder({ extendMs: numParam(c, 'extendMs'), retractMs: numParam(c, 'retractMs') }),
+        voltage: strParam(c, 'coilVoltage') as Voltage,
+        fault: null,
+      };
+    case 'conveyor':
+      return {
+        type: c.type,
+        motor: driveMotor(c),
+        conveyor: new Conveyor({ transitMs: numParam(c, 'transitS') * 1000, feedMs: numParam(c, 'feedS') * 1000 }),
+      };
+    case 'fan':
+      return {
+        type: c.type,
+        motor: new Motor({
+          ratedCurrentA: 0.3,
+          ratedRpm: numParam(c, 'ratedRpm'),
+          startTauMs: numParam(c, 'startTauMs'),
+          coastTauMs: numParam(c, 'coastTauMs'),
+          lockedRotorRatio: 2,
+          loadPct: 100,
+        }),
+        voltage: strParam(c, 'voltage') as Voltage,
+        fault: null,
+      };
+    case 'pump':
+      return {
+        type: c.type,
+        motor: driveMotor(c),
+        tank: new Tank({
+          fillMs: numParam(c, 'fillS') * 1000,
+          drainMs: numParam(c, 'drainS') * 1000,
+          initialLevel: numParam(c, 'initialPct') / 100,
+        }),
       };
     case 'custom': {
       const def = c.custom!;
@@ -339,17 +439,39 @@ export class Simulation {
         });
         d.fault = fault;
         d.relay.update(energized, TICK_MS);
+      } else if (d.type === 'cylinder') {
+        const r = loadResponse(d.voltage, supply(e, 'A1', 'A2'));
+        d.fault = r.fault;
+        d.cylinder.update(r.on, TICK_MS);
       }
     }
 
-    // 5. Motorlar: üç farklı faz gerekir; faz sırası yönü belirler
+    // 5. Motorlar: üç farklı faz gerekir; faz sırası yönü belirler. Tahrik ettikleri mekanizma
+    //    (bant, depo) motor hızıyla ilerler.
     for (const e of this.entries) {
-      if (e.device.type !== 'motor3') continue;
+      const d = e.device;
+      const motor = threePhaseMotor(d);
+      if (!motor) continue;
       const phases = ['U', 'V', 'W'].map((n) => PHASES.indexOf(nets.potential(e.t[n]!) as Potential));
       const powered = phases.every((p) => p >= 0) && new Set(phases).size === 3;
       const [u, v] = phases as [number, number, number];
       const direction = powered && (v - u + 3) % 3 === 1 ? 1 : -1;
-      e.device.motor.update(powered, TICK_MS, powered ? direction : e.device.motor.direction);
+      motor.update(powered, TICK_MS, powered ? direction : motor.direction);
+      if (d.type === 'conveyor') d.conveyor.update(motor.speed, TICK_MS);
+      else if (d.type === 'pump') {
+        const was = d.tank.overflowing;
+        d.tank.update(Math.abs(motor.speed), TICK_MS);
+        if (d.tank.overflowing && !was) this.event(e, 'depo taştı (pompa dolu depoya basıyor)');
+      }
+    }
+
+    // Fanlar: tek fazlı, anma geriliminde döner
+    for (const e of this.entries) {
+      const d = e.device;
+      if (d.type !== 'fan') continue;
+      const r = loadResponse(d.voltage, supply(e, 'X1', 'X2'));
+      d.fault = r.fault;
+      d.motor.update(r.on, TICK_MS, 1);
     }
 
     // 6. Termik elemanlar: ana kutuplarıyla aynı nette olan motorların akımını taşır
@@ -359,8 +481,9 @@ export class Simulation {
       const poleNets = new Set(['2', '4', '6'].map((n) => nets.netOf(e.t[n]!)));
       let current = 0;
       for (const m of this.entries) {
-        if (m.device.type !== 'motor3') continue;
-        if (['U', 'V', 'W'].some((n) => poleNets.has(nets.netOf(m.t[n]!)))) current += m.device.motor.currentA;
+        const motor = threePhaseMotor(m.device);
+        if (!motor) continue;
+        if (['U', 'V', 'W'].some((n) => poleNets.has(nets.netOf(m.t[n]!)))) current += motor.currentA;
       }
       d.currentA = current;
       const wasTripped = d.relay.tripped;
@@ -503,6 +626,18 @@ export class Simulation {
         case 'junction':
         case 'xref':
         case 'motor3':
+        case 'fan':
+          break;
+        case 'cylinder':
+          if (d.cylinder.retracted) link('13', '14');
+          if (d.cylinder.extended) link('23', '24');
+          break;
+        case 'conveyor':
+          if (d.conveyor.sensorBlocked) link('13', '14');
+          break;
+        case 'pump':
+          if (d.tank.lowWet) link('13', '14');
+          if (d.tank.highWet) link('23', '24');
           break;
         case 'contactor':
           if (d.contactor.closed) {
@@ -582,6 +717,9 @@ export class Simulation {
       case 'thermalReset':
         if (d.type === 'thermal') d.relay.reset();
         break;
+      case 'addBox':
+        if (d.type === 'conveyor' && !d.conveyor.addBox()) this.event(e, 'bandın başında yer yok');
+        break;
     }
   }
 
@@ -648,6 +786,57 @@ export class Simulation {
           piq: p.imageCopy('Q').slice(0, PLC_DQ.length),
           dqTerminals: p.dqTerminals.slice(0, PLC_DQ.length),
           trace: structuredClone(p.lastTrace),
+        };
+      }
+      case 'cylinder': {
+        const c = d.cylinder;
+        return {
+          type: d.type,
+          valve: c.valve,
+          position: c.position,
+          retracted: c.retracted,
+          extended: c.extended,
+          fault: d.fault,
+        };
+      }
+      case 'conveyor': {
+        const m = d.motor;
+        const c = d.conveyor;
+        return {
+          type: d.type,
+          powered: m.powered,
+          speed: m.speed,
+          rpm: m.rpm,
+          currentA: m.currentA,
+          direction: m.direction,
+          boxes: [...c.boxes],
+          boxLength: Conveyor.BOX,
+          sensorAt: Conveyor.SENSOR,
+          beltPos: c.beltPos,
+          sensor: c.sensorBlocked,
+          delivered: c.delivered,
+        };
+      }
+      case 'fan': {
+        const m = d.motor;
+        return { type: d.type, powered: m.powered, speed: m.speed, rpm: m.rpm, angleDeg: m.angleDeg, fault: d.fault };
+      }
+      case 'pump': {
+        const m = d.motor;
+        const t = d.tank;
+        return {
+          type: d.type,
+          powered: m.powered,
+          speed: m.speed,
+          rpm: m.rpm,
+          currentA: m.currentA,
+          angleDeg: m.angleDeg,
+          level: t.level,
+          lowAt: Tank.LOW,
+          highAt: Tank.HIGH,
+          low: t.lowWet,
+          high: t.highWet,
+          overflowing: t.overflowing,
         };
       }
       case 'custom':

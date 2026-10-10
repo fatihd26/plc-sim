@@ -158,3 +158,144 @@ export class Motor {
     return this.speed !== 0;
   }
 }
+
+// --- Mekanik elemanlar ---------------------------------------------------------------------
+
+export interface CylinderParams {
+  /** Tam stroku ileri gitme süresi [ms]. */
+  extendMs: number;
+  /** Tam stroku geri dönme süresi [ms]. */
+  retractMs: number;
+}
+
+/**
+ * Çift etkili pnömatik silindir, 5/2 yaylı (monostabil) valfle sürülür.
+ * Valf bobini enerjiliyken piston sabit hızla ileri, değilse geri gider.
+ * Uç sensörleri (reed) stroğun son SENSOR_BAND kadarlık kısmında algılar.
+ */
+export class Cylinder {
+  static readonly SENSOR_BAND = 0.03;
+
+  /** Piston konumu: 0 = tam geride, 1 = tam ileride. */
+  position = 0;
+  valve = false;
+
+  constructor(readonly params: CylinderParams = { extendMs: 1000, retractMs: 1000 }) {}
+
+  update(valve: boolean, dtMs: number): void {
+    this.valve = valve;
+    if (valve) this.position = Math.min(1, this.position + dtMs / this.params.extendMs);
+    else this.position = Math.max(0, this.position - dtMs / this.params.retractMs);
+  }
+
+  get retracted(): boolean {
+    return this.position <= Cylinder.SENSOR_BAND;
+  }
+
+  get extended(): boolean {
+    return this.position >= 1 - Cylinder.SENSOR_BAND;
+  }
+}
+
+export interface ConveyorParams {
+  /** Nominal hızda bir noktanın bandın başından sonuna gitme süresi [ms]. */
+  transitMs: number;
+  /** Otomatik kutu besleme aralığı [ms]; 0 = kapalı. */
+  feedMs: number;
+}
+
+/**
+ * Konveyör bant: kutular bant hızıyla birlikte hareket eder. Konumlar bant uzunluğuna oranlıdır
+ * (0 = baş, 1 = son). Ağırlık merkezi bant ucunu geçen kutu düşer; sondan düşenler "teslim" sayılır.
+ */
+export class Conveyor {
+  /** Kutu boyu (bant uzunluğuna oranla). */
+  static readonly BOX = 0.12;
+  /** Kutular arasında bırakılan en küçük boşluk. */
+  static readonly GAP = 0.04;
+  /** Fotoselin bant üzerindeki konumu. */
+  static readonly SENSOR = 0.76;
+
+  /** Kutuların sol kenar konumları. */
+  boxes: number[] = [];
+  /** Bant yüzeyinin toplam yer değiştirmesi (animasyon için), 0..1. */
+  beltPos = 0;
+  /** Bandın sonundan düşen kutu sayısı. */
+  delivered = 0;
+  private feedTimerMs = 0;
+
+  constructor(readonly params: ConveyorParams = { transitMs: 6000, feedMs: 4000 }) {}
+
+  /** speed: tahrik motorunun nominal hıza oranla işaretli hızı (−1..1). */
+  update(speed: number, dtMs: number): void {
+    const dx = (speed * dtMs) / this.params.transitMs;
+    this.beltPos = (((this.beltPos + dx) % 1) + 1) % 1;
+    if (dx !== 0) {
+      const kept: number[] = [];
+      for (const p of this.boxes) {
+        const q = p + dx;
+        const center = q + Conveyor.BOX / 2;
+        if (center > 1) this.delivered++;
+        else if (center >= 0) kept.push(q);
+      }
+      this.boxes = kept;
+    }
+    if (this.params.feedMs > 0) {
+      this.feedTimerMs += dtMs;
+      if (this.feedTimerMs >= this.params.feedMs && this.addBox()) this.feedTimerMs = 0;
+    }
+  }
+
+  /** Bandın başına kutu koyar; başta yer yoksa reddedilir. */
+  addBox(): boolean {
+    if (this.boxes.some((p) => p < Conveyor.BOX + Conveyor.GAP)) return false;
+    this.boxes.push(0);
+    return true;
+  }
+
+  /** Fotosel: ışın bir kutu tarafından kesiliyor mu. */
+  get sensorBlocked(): boolean {
+    return this.boxes.some((p) => p <= Conveyor.SENSOR && p + Conveyor.BOX >= Conveyor.SENSOR);
+  }
+}
+
+export interface TankParams {
+  /** Nominal pompa hızında boş depoyu doldurma süresi [ms]. */
+  fillMs: number;
+  /** Tüketimle dolu deponun boşalma süresi [ms]; 0 = tüketim yok. */
+  drainMs: number;
+  /** Başlangıç seviyesi, 0..1. */
+  initialLevel: number;
+}
+
+/** Su deposu: pompa doldurur, tüketim sabit debiyle boşaltır. Dolu depoya basılan su taşar. */
+export class Tank {
+  static readonly LOW = 0.2;
+  static readonly HIGH = 0.8;
+
+  level: number;
+  /** Depo dolu ve pompa hâlâ basıyor. */
+  overflowing = false;
+
+  constructor(readonly params: TankParams = { fillMs: 20_000, drainMs: 40_000, initialLevel: 0.1 }) {
+    this.level = Math.min(1, Math.max(0, params.initialLevel));
+  }
+
+  /** flow: pompanın nominal debiye oranla debisi (0..1). */
+  update(flow: number, dtMs: number): void {
+    const inflow = (flow * dtMs) / this.params.fillMs;
+    const outflow = this.params.drainMs > 0 ? dtMs / this.params.drainMs : 0;
+    const next = this.level + inflow - outflow;
+    this.overflowing = next > 1 && inflow > 0;
+    this.level = Math.min(1, Math.max(0, next));
+  }
+
+  /** Alt seviye sensörü ıslak (su seviyesi sensöre ulaştı). */
+  get lowWet(): boolean {
+    return this.level >= Tank.LOW;
+  }
+
+  get highWet(): boolean {
+    return this.level >= Tank.HIGH;
+  }
+}

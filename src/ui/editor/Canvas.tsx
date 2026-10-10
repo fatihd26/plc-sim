@@ -91,7 +91,8 @@ const WIRE_HIT = 6;
 const potentialClass = (p: NetPotential | undefined) => (p ? `p-${p}` : '');
 
 const MOMENTARY = new Set<ComponentType>(['buttonNO', 'buttonNC']);
-const LATCHING = new Set<ComponentType>(['estop', 'breaker3', 'fuse']);
+/** Her tıklamada onToggle: kilitlemeli elemanlar durum değiştirir, konveyöre kutu konur. */
+const LATCHING = new Set<ComponentType>(['estop', 'breaker3', 'fuse', 'conveyor']);
 const hasPush = (c: ComponentInstance) =>
   c.type === 'custom' && !!c.custom?.poles.some((p) => p.kind === 'pushNO' || p.kind === 'pushNC');
 const isMomentary = (c: ComponentInstance) => MOMENTARY.has(c.type) || hasPush(c);
@@ -634,7 +635,7 @@ export function Canvas(props: Props) {
   return (
     <div
       ref={hostRef}
-      className={`canvas-host mode-${mode}`}
+      className={`canvas-host mode-${mode}${running ? ' running' : ''}`}
       onDragOver={onDragOver}
       onDragLeave={() => setGhost(null)}
       onDrop={onDrop}
