@@ -1,3 +1,4 @@
+import { startStopProgram } from './programs';
 import type { Schematic, Wire } from './schematic';
 
 let n = 0;
@@ -15,7 +16,9 @@ const w = (a: string, b: string): Wire => {
 export function startStopSchematic(): Schematic {
   n = 0;
   return {
-    version: 1,
+    version: 2,
+    title: 'Start-stop örneği',
+    pages: [{ id: 'p1', title: 'Güç ve kumanda devresi' }],
     components: [
       { id: 'X1', type: 'mains3', name: 'X1', x: 40, y: 40, rotation: 0 },
       { id: 'K1', type: 'contactor', name: 'K1', x: 40, y: 160, rotation: 0 },
@@ -24,7 +27,7 @@ export function startStopSchematic(): Schematic {
       { id: 'G1', type: 'psu24', name: 'G1', x: 300, y: 20, rotation: 0 },
       { id: 'S1', type: 'buttonNO', name: 'S1', x: 380, y: 140, rotation: 0 },
       { id: 'S2', type: 'buttonNC', name: 'S2', x: 460, y: 140, rotation: 0 },
-      { id: 'A1', type: 'plc', name: 'A1', x: 340, y: 280, rotation: 0 },
+      { id: 'A1', type: 'plc', name: 'A1', x: 340, y: 280, rotation: 0, program: structuredClone(startStopProgram) },
     ],
     wires: [
       // Güç devresi

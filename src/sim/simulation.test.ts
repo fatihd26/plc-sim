@@ -148,7 +148,7 @@ describe('kablolama', () => {
     expect(m1(sim).rpm).toBeLessThan(-1400);
   });
 
-  it('24 V ile 0 V arasındaki kablo kısa devre olarak raporlanır', () => {
+  it('24 V ile 0 V arasındaki kısa devrede güç kaynağı akım sınırlamasına geçer, arıza kalkınca toparlanır', () => {
     const s = startStopSchematic();
     s.wires.push({ id: 'short', a: { component: 'S1', terminal: '14' }, b: { component: 'G1', terminal: 'M' } });
     const sim = newSim(s);
@@ -156,10 +156,18 @@ describe('kablolama', () => {
     expect(sim.snapshot().shorts).toEqual([]); // S1 açıkken kısa devre yok
     press(sim, 'S1');
     sim.run(20);
-    const snap = sim.snapshot();
-    expect(snap.shorts.length).toBe(1);
-    expect(snap.shorts[0]).toContain('S1:14');
-    expect(snap.potentials['G1:L+']).toBe('short');
+    let snap = sim.snapshot();
+    expect(snap.shorts).toEqual([]);
+    expect(state(snap, 'G1', 'psu24').limited).toBe(true);
+    expect(snap.potentials['G1:L+']).toBeNull();
+    expect(plc(sim).powered).toBe(false);
+    expect(snap.events.at(-1)?.text).toMatch(/G1: kısa devre/);
+    release(sim, 'S1');
+    sim.run(20);
+    snap = sim.snapshot();
+    expect(state(snap, 'G1', 'psu24').limited).toBe(false);
+    expect(snap.potentials['G1:L+']).toBe('P24');
+    expect(plc(sim).powered).toBe(true);
   });
 
   it('potansiyeller terminaller üzerinden raporlanır', () => {
@@ -308,7 +316,7 @@ describe('kütüphane genişletmesi', () => {
 
   /** G1 → X1 klemens → S1 acil stop → P1 lamba → G1:M */
   const lampCircuit = (): Schematic => ({
-    version: 1,
+    version: 2,
     components: [
       { id: 'G1', type: 'psu24', name: 'G1', ...at },
       { id: 'X1', type: 'terminal', name: 'X1', ...at },

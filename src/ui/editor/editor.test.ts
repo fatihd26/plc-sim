@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import { startStopSchematic } from '../../sim/examples';
 import { emptySchematic, validateSchematic } from '../../sim/schematic';
-import { editorReducer, initEditor, type EditorAction, type EditorState } from './document';
+import { EMPTY_SELECTION, editorReducer, initEditor, selectComponent, type EditorAction, type EditorState } from './document';
 import { bounds, geometryMismatches, GEOMETRY, worldTerminal } from './geometry';
 import { route, simplify } from './routing';
 
 const run = (state: EditorState, ...actions: EditorAction[]) => actions.reduce(editorReducer, state);
+const add = (componentType: Extract<EditorAction, { type: 'add' }>['componentType'], x: number, y: number): EditorAction => ({
+  type: 'add',
+  componentType,
+  x,
+  y,
+  page: 'p1',
+});
 
 describe('geometri', () => {
   it('her katalog tipinin tüm terminalleri çizimde tanımlı', () => {
@@ -76,25 +83,25 @@ describe('editör dokümanı', () => {
   it('eklenen bileşenler benzersiz kimlik ve önekli ad alır', () => {
     const s = run(
       empty,
-      { type: 'add', componentType: 'contactor', x: 0, y: 0 },
-      { type: 'add', componentType: 'contactor', x: 200, y: 0 },
-      { type: 'add', componentType: 'buttonNO', x: 0, y: 200 },
-      { type: 'add', componentType: 'buttonNC', x: 0, y: 200 },
+      add('contactor', 0, 0),
+      add('contactor', 200, 0),
+      add('buttonNO', 0, 200),
+      add('buttonNC', 0, 200),
     );
     expect(s.schematic.components.map((c) => c.name)).toEqual(['K1', 'K2', 'S1', 'S2']);
     expect(new Set(s.schematic.components.map((c) => c.id)).size).toBe(4);
-    expect(s.selection).toEqual({ kind: 'component', id: s.schematic.components[3]!.id });
+    expect(s.selection).toEqual(selectComponent(s.schematic.components[3]!.id));
   });
 
   it('silinen addan sonra boş numara yeniden kullanılır', () => {
-    let s = run(empty, { type: 'add', componentType: 'motor3', x: 0, y: 0 }, { type: 'add', componentType: 'motor3', x: 0, y: 0 });
-    s = run(s, { type: 'select', selection: { kind: 'component', id: s.schematic.components[0]!.id } }, { type: 'deleteSelection' });
-    s = run(s, { type: 'add', componentType: 'motor3', x: 0, y: 0 });
+    let s = run(empty, add('motor3', 0, 0), add('motor3', 0, 0));
+    s = run(s, { type: 'select', selection: selectComponent(s.schematic.components[0]!.id) }, { type: 'deleteSelection' });
+    s = run(s, add('motor3', 0, 0));
     expect(s.schematic.components.map((c) => c.name).sort()).toEqual(['M1', 'M2']);
   });
 
   it('kablo: aynı terminal ve tekrarlanan bağlantı reddedilir', () => {
-    let s = run(empty, { type: 'add', componentType: 'buttonNO', x: 0, y: 0 }, { type: 'add', componentType: 'buttonNC', x: 100, y: 0 });
+    let s = run(empty, add('buttonNO', 0, 0), add('buttonNC', 100, 0));
     const [a, b] = s.schematic.components;
     const ta = { component: a!.id, terminal: '14' };
     const tb = { component: b!.id, terminal: '11' };
@@ -108,16 +115,16 @@ describe('editör dokümanı', () => {
   it('bileşen silinince bağlı kabloları da silinir', () => {
     let s = initEditor(startStopSchematic());
     const before = s.schematic.wires.length;
-    s = run(s, { type: 'select', selection: { kind: 'component', id: 'S1' } }, { type: 'deleteSelection' });
+    s = run(s, { type: 'select', selection: selectComponent('S1') }, { type: 'deleteSelection' });
     expect(s.schematic.components.some((c) => c.id === 'S1')).toBe(false);
     expect(s.schematic.wires.length).toBe(before - 3);
     expect(validateSchematic(s.schematic)).toEqual([]);
   });
 
   it('geri al / yinele', () => {
-    let s = run(empty, { type: 'add', componentType: 'psu24', x: 0, y: 0 });
+    let s = run(empty, add('psu24', 0, 0));
     const id = s.schematic.components[0]!.id;
-    s = run(s, { type: 'move', id, x: 50, y: 60 }, { type: 'rotate', id });
+    s = run(s, { type: 'moveMany', ids: [id], dx: 50, dy: 60 }, { type: 'rotate', ids: [id] });
     expect(s.schematic.components[0]).toMatchObject({ x: 50, y: 60, rotation: 90 });
     s = run(s, { type: 'undo' });
     expect(s.schematic.components[0]).toMatchObject({ x: 50, y: 60, rotation: 0 });
@@ -131,10 +138,16 @@ describe('editör dokümanı', () => {
   });
 
   it('değişmeyen işlemler geçmişe yazılmaz', () => {
-    let s = run(empty, { type: 'add', componentType: 'psu24', x: 0, y: 0 });
+    let s = run(empty, add('psu24', 0, 0));
     const id = s.schematic.components[0]!.id;
     const pastLen = s.past.length;
-    s = run(s, { type: 'move', id, x: 0, y: 0 }, { type: 'rename', id, name: '  ' }, { type: 'select', selection: null });
+    s = run(
+      s,
+      { type: 'moveMany', ids: [id], dx: 0, dy: 0 },
+      { type: 'rename', id, name: '  ' },
+      { type: 'select', selection: EMPTY_SELECTION },
+      { type: 'setParam', id, key: 'yok', value: 1 },
+    );
     expect(s.past.length).toBe(pastLen);
   });
 });

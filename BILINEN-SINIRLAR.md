@@ -1,50 +1,81 @@
-# Bilinen sınırlar (v0.2)
+# Bilinen sınırlar
 
-Sonradan ele alınacak eksikler. Her madde, ilgili kodun yerini ve olası bir çözüm yönünü içerir.
+## v0.2 listesi: çözülenler (v0.3)
 
-## PLC programı
+### PLC programı
 
-- [ ] **Program sabit.** Tüm PLC'ler start-stop mühürleme programını çalıştırır
-  (`src/sim/programs.ts`, `DEFAULT_CONFIG` → `src/sim/simulation.ts`). Kullanıcı programı
-  düzenleyemez.
-  *Çözüm yönü:* programı şema dokümanına (veya PLC bileşen örneğine) bağlamak, bir ladder editörü eklemek.
-- [ ] **Programdaki etiketler sabit.** Ladder'daki "S1 Start", "K1 Kontaktör" gibi etiketler,
-  şemadaki gerçek bağlantılardan bağımsızdır. Elemanların adı değişse ya da kablolama farklı olsa da
-  bu etiketler aynı kalır.
-- [ ] **Alt panel yalnız ilk PLC'yi gösterir.** Şemada birden fazla PLC varsa alt panelde sadece
-  ilki izlenir (`firstPlc` → `src/ui/App.tsx`).
-  *Çözüm yönü:* seçili PLC'yi izlemek veya alt panelde PLC seçici kullanmak.
+- [x] **Program sabit.** Program artık her PLC örneğinde saklanır (`ComponentInstance.program`).
+  Alt paneldeki ladder editöründen network eklenip sıralanabilir. Seri/paralel kontak eklenebilir,
+  adres, NO/NC ve açıklama değiştirilebilir (`src/sim/ladderEdit.ts`, `src/ui/LadderEditor.tsx`).
+  Program şema dosyasıyla kaydedilir ve geri alınabilir.
+- [x] **Programdaki etiketler sabit.** Ladder'daki eleman adları sembol tablosundan gelir
+  (`src/sim/symbolTable.ts`). %I/%Q terminalinden kablolar boyunca (klemens, bağlantı noktası ve
+  sayfa geçişleri üzerinden) ilerlenir ve bulunan elemanın adı gösterilir. Ad veya kablolama
+  değişince etiket de değişir. Elle yazılan metin artık yalnız açıklamadır.
+- [x] **Alt panel yalnız ilk PLC'yi gösterir.** Alt panelde PLC seçici var. Bir PLC seçilince panel
+  ona geçer.
 
-## Kablo çizimi
+### Kablo çizimi
 
-- [ ] **Otomatik yönlendirme engellerden kaçmaz.** Kablolar elemanların ve birbirlerinin üzerinden
-  geçebilir, bu yüzden örnek şemada üst üste binen hatlar var (`src/ui/editor/routing.ts`).
-  *Çözüm yönü:* ızgara üzerinde A* gibi engelden kaçan bir yönlendirme, ayrıca paralel kabloları
-  kaydırmak.
-- [ ] **Kablo elle şekillendirilemez.** Kablolara büküm noktası eklenemez, güzergâhları
-  taşınamaz. Kablo yalnız iki terminal arasında otomatik çizilir.
-- [ ] **Bağlantı noktası (junction) yok.** Bir kablo ancak terminalden başlayıp terminalde
-  bitebilir, başka bir kablonun ortasından dallanamaz.
+- [x] **Otomatik yönlendirme engellerden kaçmaz.** Sayfadaki kablolar ızgara üzerinde A* ile
+  yönlendirilir (`routeAll` → `src/ui/editor/routing.ts`). Eleman gövdeleri engeldir. Başka netin
+  kablosuyla üst üste binme, köşe paylaşma, kesişme ve büküm cezalandırılır. Aynı netin kabloları
+  hattı paylaşabilir.
+- [x] **Kablo elle şekillendirilemez.** Seçili kablonun parça tutamaçları sürüklenebilir. Ara
+  noktalar `Wire.points` içinde saklanır. "Otomatik güzergâh" düğmesi kabloyu otomatiğe döndürür.
+- [x] **Bağlantı noktası (junction) yok.** Kablo ucu başka bir kablonun ortasına bırakılınca
+  bağlantı noktası oluşur ve kablo ikiye bölünür. Kablosu kalmayan bağlantı noktası kendiliğinden
+  silinir.
 
-## Bileşenler ve simülasyon
+### Bileşenler ve simülasyon
 
-- [ ] **Bileşen parametreleri düzenlenemez.** Termik ayar akımı (Ir = 4 A), motor değerleri,
-  kontaktör çekme/bırakma süreleri ve PLC scan süresi (10 ms) sabittir (`createDevice` →
-  `src/sim/simulation.ts`). Özellikler panelinde sadece etiket değiştirilebilir.
-- [ ] **Kısa devre sadece uyarı olarak gösterilir.** Kısa devre algılanır ve durum çubuğunda
-  görünür. Ancak hiçbir koruma (sigorta ya da şalter) açmaz ve simülasyon devam eder.
-- [ ] **Motor koruma şalteri sadece elle açılıp kapanır.** Aşırı akımda veya kısa devrede
-  kendiliğinden açmaz.
-- [ ] **Gerilim seviyeleri sınırlı.** Bobin ve lamba sadece 24 V DC ile çalışır. Mantıksal çözücü
-  akım ve gerilim hesaplamaz, sadece potansiyel etiketi taşır (`src/sim/netlist.ts`).
-- [ ] **Kütüphane kod içinde tanımlı.** Kullanıcı arayüzden yeni bileşen tipi ekleyemez. Yeni bir
-  tip eklemek için 4 dosyayı birlikte değiştirmek gerekir (bkz. README › Kütüphane).
+- [x] **Bileşen parametreleri düzenlenemez.** Özellikler panelinde düzenlenebilen parametreler:
+  termik ve şalter ayar akımı ile ısıl zaman sabiti; motor nominal akımı, hızı, yükü, kalkış oranı
+  ve zaman sabitleri; kontaktör bobin gerilimi ve çekme/bırakma süreleri; lamba gerilimi ve rengi;
+  PLC scan süresi.
+- [x] **Kısa devre sadece uyarı olarak gösterilir.** Kısa devrede, arızayı ayırabilen koruma
+  elemanlarından devrenin en büyük kısmını enerjili bırakanı açar. Bu eleman bir otomatik sigorta
+  (yeni), bir motor koruma şalteri (manyetik açma) ya da akım sınırlamasına geçen güç kaynağı
+  olabilir. Olaylar durum çubuğunda ve Özellikler › Proje altında listelenir. Koruma elemanı yoksa
+  eski uyarı gösterilir.
+- [x] **Motor koruma şalteri sadece elle açılıp kapanır.** Aşırı akımda (termik, I² modeli) ve kısa
+  devrede kendiliğinden açar. Soğumadan tekrar kapatılamaz.
+- [x] **Gerilim seviyeleri sınırlı.** Şebekeye N eklendi. Bobinler ve lambalar 24 V DC veya 230 V AC
+  seçilebilir. Yanlış gerilimde çekmez, arıza verir (ör. 24 V bobin 230 V'ta, 230 V lamba 400 V'ta).
+- [x] **Kütüphane kod içinde tanımlı.** Kütüphanedeki "Kullanıcı" kategorisinden yeni bileşen
+  tanımlanabilir. Bileşen; bobin, bobinle çalışan NO/NC kontak, elle basılan NO/NC, lamba ve köprü
+  kutuplarından oluşur. Tanım proje dosyasında saklanır. Tanım değişince şemadaki örnekler
+  güncellenir.
 
-## Editör
+### Editör
 
-- [ ] **Çoklu seçim yok.** Aynı anda tek eleman veya tek kablo seçilebilir. Kutu ile seçme,
-  kopyala/yapıştır ve grup taşıma yok.
-- [ ] **Sayfa yapısı yok.** EPLAN'daki gibi çok sayfalı proje, antet ve sayfalar arası referans
-  bulunmuyor. Tüm şema tek bir sonsuz çizim alanında duruyor.
-- [ ] **Dar ekran desteği zayıf.** Düzen masaüstüne göre tasarlandı. 760 px altında paneller alt
-  alta diziliyor ama dokunmatik kullanım test edilmedi.
+- [x] **Çoklu seçim yok.** Kutu ile seçim mümkün: soldan sağa çizilen kutu içindekileri, sağdan
+  sola çizilen kutu değdiklerini seçer. Shift/Ctrl+tık seçime ekler veya çıkarır. Ctrl+A tümünü
+  seçer. Grup taşıma, döndürme ve silme var. Ctrl+C/X/V ile kopyala, kes, yapıştır (imleç
+  konumuna), Ctrl+D ile çoğalt.
+- [x] **Sayfa yapısı yok.** Çok sayfalı proje var: sayfa sekmeleri, ekleme, yeniden adlandırma
+  (çift tık) ve silme. Her sayfada çerçeve ve antet (proje adı, sayfa adı, sayfa no) bulunur. Aynı
+  adlı "Sayfa geçişi" elemanları elektriksel olarak bağlıdır ve karşı sayfa numarasını gösterir.
+  Çift tıklayınca karşı sayfaya gidilir.
+- [~] **Dar ekran desteği zayıf.** Dokunmatikte tek parmak kaydırır, iki parmak yakınlaştırır.
+  Terminal yakalama yarıçapı büyür. Kütüphaneden sürükle-bırak yerine "tıkla, sonra alana tıkla"
+  ile yerleştirme yapılabilir. Dar ekranda alt panel tek sütuna iner. **Gerçek bir dokunmatik
+  cihazda henüz test edilmedi.**
+
+## Kalan sınırlar (v0.3)
+
+- [ ] **Mantıksal çözücü akım hesaplamaz.** Kısa devre, aynı nette iki farklı potansiyel olarak
+  algılanır. Termik ve şalterin gördüğü akım yalnız motor modelinden gelir; lamba ve bobin akımı
+  hesaba katılmaz.
+- [ ] **Koruma seçiciliği sezgiseldir.** Açılacak eleman, devrenin en büyük kısmını enerjili
+  bırakan elemandır. Gerçek açma eğrileri ve kademelendirme modellenmez.
+- [ ] **Kullanıcı kütüphanesi projeye bağlı.** Tanımlar proje dosyasında saklanır. Projeler arası
+  ortak kütüphane veya içe aktarma yok. Kullanıcı bileşeninin sembolü kutup türlerinden üretilir,
+  serbest çizilemez.
+- [ ] **Ladder komut seti dar.** Yalnız NO/NC kontak ve bobin var. Set/reset, zamanlayıcı ve
+  sayıcı yok.
+- [ ] **Kablo yönlendirme sayfa bazında sırayla yapılır.** Önce çizilen kablo en iyi yolu alır.
+  Çok yoğun sayfalarda A* yol bulamazsa basit L/Z güzergâhına düşülür. Taşıma sırasında etkilenen
+  kablolar basit güzergâhla önizlenir.
+- [ ] **Sayfalar arası taşıma yok.** Bir eleman kesip başka sayfaya yapıştırılarak taşınabilir.
+  Bu durumda dış kabloları kaybolur.

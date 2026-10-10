@@ -1,9 +1,42 @@
 // Editör dokümanı: şema + seçim + geri al/yinele geçmişi. Saf reducer, React'tan bağımsız.
 
-import { CATALOG, type ComponentType } from '../../sim/catalog';
-import { sameTerminal, type ComponentInstance, type Rotation, type Schematic, type TerminalRef } from '../../sim/schematic';
+import { CATALOG, prefixOf, terminalsOf, type ComponentType, type CustomDef, type ParamValue } from '../../sim/catalog';
+import type { LadderProgram } from '../../sim/ladder';
+import {
+  pageOf,
+  pagesOf,
+  sameTerminal,
+  type ComponentInstance,
+  type Point,
+  type Rotation,
+  type Schematic,
+  type TerminalRef,
+  type Wire,
+} from '../../sim/schematic';
+import { geometryOf } from './geometry';
 
-export type Selection = { kind: 'component'; id: string } | { kind: 'wire'; id: string } | null;
+/** Seçili bileşenler ve kablolar (ikisi de boş olabilir). */
+export interface Selection {
+  components: string[];
+  wires: string[];
+}
+
+export const EMPTY_SELECTION: Selection = { components: [], wires: [] };
+export const selectComponent = (id: string): Selection => ({ components: [id], wires: [] });
+export const selectWire = (id: string): Selection => ({ components: [], wires: [id] });
+export const isEmpty = (s: Selection) => s.components.length === 0 && s.wires.length === 0;
+
+/** Tek bir eleman seçiliyse onu döndürür. */
+export function single(s: Selection): { kind: 'component' | 'wire'; id: string } | null {
+  if (s.components.length === 1 && s.wires.length === 0) return { kind: 'component', id: s.components[0]! };
+  if (s.wires.length === 1 && s.components.length === 0) return { kind: 'wire', id: s.wires[0]! };
+  return null;
+}
+
+export interface Clipboard {
+  components: ComponentInstance[];
+  wires: Wire[];
+}
 
 export interface EditorState {
   schematic: Schematic;
@@ -13,22 +46,39 @@ export interface EditorState {
 }
 
 export type EditorAction =
-  | { type: 'add'; componentType: ComponentType; x: number; y: number }
-  | { type: 'move'; id: string; x: number; y: number }
-  | { type: 'rotate'; id: string }
+  | { type: 'add'; componentType: ComponentType; x: number; y: number; page: string; custom?: CustomDef }
+  | { type: 'moveMany'; ids: string[]; dx: number; dy: number }
+  | { type: 'rotate'; ids: string[] }
   | { type: 'rename'; id: string; name: string }
+  | { type: 'setParam'; id: string; key: string; value: ParamValue }
+  | { type: 'setProgram'; id: string; program: LadderProgram }
   | { type: 'connect'; a: TerminalRef; b: TerminalRef }
+  /** Kablonun ortasına bağlanma: (x, y)'de bağlantı noktası oluşturur, kabloyu böler. */
+  | { type: 'connectToWire'; from: TerminalRef; wire: string; x: number; y: number }
+  | { type: 'setWirePoints'; id: string; points: Point[] | undefined }
   | { type: 'deleteSelection' }
   | { type: 'select'; selection: Selection }
+  | { type: 'paste'; clip: Clipboard; dx: number; dy: number; page: string }
+  | { type: 'addPage'; id: string; title: string }
+  | { type: 'renamePage'; id: string; title: string }
+  | { type: 'deletePage'; id: string }
+  | { type: 'setTitle'; title: string }
+  | { type: 'defineCustom'; def: CustomDef }
+  | { type: 'deleteCustom'; id: string }
   | { type: 'load'; schematic: Schematic }
   | { type: 'undo' }
   | { type: 'redo' };
 
 const HISTORY_LIMIT = 100;
 
-export const initEditor = (schematic: Schematic): EditorState => ({ schematic, selection: null, past: [], future: [] });
+export const initEditor = (schematic: Schematic): EditorState => ({
+  schematic,
+  selection: EMPTY_SELECTION,
+  past: [],
+  future: [],
+});
 
-function nextId(prefix: string, used: Iterable<string>): string {
+export function nextId(prefix: string, used: Iterable<string>): string {
   let max = 0;
   const re = new RegExp(`^${prefix}(\\d+)$`);
   for (const id of used) {
@@ -39,10 +89,10 @@ function nextId(prefix: string, used: Iterable<string>): string {
 }
 
 /** Aynı önekli en küçük boş numara (K1, K2...). */
-export function nextName(schematic: Schematic, type: ComponentType): string {
-  const prefix = CATALOG[type].prefix;
-  const taken = new Set(schematic.components.map((c) => c.name));
-  for (let i = 1; ; i++) if (!taken.has(`${prefix}${i}`)) return `${prefix}${i}`;
+export function nextName(schematic: Schematic, inst: Pick<ComponentInstance, 'type' | 'custom'>, taken?: Set<string>): string {
+  const prefix = prefixOf(inst);
+  const names = taken ?? new Set(schematic.components.map((c) => c.name));
+  for (let i = 1; ; i++) if (!names.has(`${prefix}${i}`)) return `${prefix}${i}`;
 }
 
 function commit(state: EditorState, schematic: Schematic, selection: Selection = state.selection): EditorState {
@@ -58,37 +108,101 @@ function updateComponent(s: Schematic, id: string, fn: (c: ComponentInstance) =>
   return { ...s, components: s.components.map((c) => (c.id === id ? fn(c) : c)) };
 }
 
+/** Kablosu kalmamış bağlantı noktalarını siler. */
+function pruneJunctions(s: Schematic): Schematic {
+  const used = new Set(s.wires.flatMap((w) => [w.a.component, w.b.component]));
+  const components = s.components.filter((c) => c.type !== 'junction' || used.has(c.id));
+  return components.length === s.components.length ? s : { ...s, components };
+}
+
+/** Terminali artık var olmayan kabloları siler (ör. kullanıcı bileşeni tanımı değişince). */
+function pruneDanglingWires(s: Schematic): Schematic {
+  const byId = new Map(s.components.map((c) => [c.id, c]));
+  const ok = (r: TerminalRef) => {
+    const c = byId.get(r.component);
+    return !!c && terminalsOf(c).includes(r.terminal);
+  };
+  const wires = s.wires.filter((w) => ok(w.a) && ok(w.b));
+  return wires.length === s.wires.length ? s : { ...s, wires };
+}
+
+/** Seçimi panoya kopyalar: seçili bileşenler ve iki ucu da seçimde olan kablolar. */
+export function copySelection(s: Schematic, sel: Selection): Clipboard {
+  const ids = new Set(sel.components);
+  return structuredClone({
+    components: s.components.filter((c) => ids.has(c.id)),
+    wires: s.wires.filter((w) => ids.has(w.a.component) && ids.has(w.b.component)),
+  });
+}
+
+function newComponent(
+  s: Schematic,
+  type: ComponentType,
+  x: number,
+  y: number,
+  page: string,
+  custom?: CustomDef,
+): ComponentInstance {
+  const id = nextId('c', s.components.map((c) => c.id));
+  const c: ComponentInstance = { id, type, name: '', x, y, rotation: 0, page };
+  if (custom) c.custom = structuredClone(custom);
+  if (type === 'plc') c.program = { networks: [] };
+  c.name = nextName(s, c);
+  return c;
+}
+
 export function editorReducer(state: EditorState, action: EditorAction): EditorState {
   const s = state.schematic;
   switch (action.type) {
     case 'add': {
-      const id = nextId('c', s.components.map((c) => c.id));
-      const component: ComponentInstance = {
-        id,
-        type: action.componentType,
-        name: nextName(s, action.componentType),
-        x: action.x,
-        y: action.y,
-        rotation: 0,
-      };
-      return commit(state, { ...s, components: [...s.components, component] }, { kind: 'component', id });
+      if (action.componentType === 'custom' && !action.custom) return state;
+      const c = newComponent(s, action.componentType, action.x, action.y, action.page, action.custom);
+      return commit(state, { ...s, components: [...s.components, c] }, selectComponent(c.id));
     }
-    case 'move': {
-      const c = s.components.find((c) => c.id === action.id);
-      if (!c || (c.x === action.x && c.y === action.y)) return state;
-      return commit(state, updateComponent(s, action.id, (c) => ({ ...c, x: action.x, y: action.y })));
+    case 'moveMany': {
+      const ids = new Set(action.ids);
+      const { dx, dy } = action;
+      if ((!dx && !dy) || ids.size === 0) return state;
+      const shift = (p: Point) => ({ x: p.x + dx, y: p.y + dy });
+      return commit(state, {
+        ...s,
+        components: s.components.map((c) => (ids.has(c.id) ? { ...c, x: c.x + dx, y: c.y + dy } : c)),
+        // İki ucu birlikte taşınan kablonun elle verilmiş güzergâhı da taşınır.
+        wires: s.wires.map((w) =>
+          w.points && ids.has(w.a.component) && ids.has(w.b.component) ? { ...w, points: w.points.map(shift) } : w,
+        ),
+      });
     }
-    case 'rotate':
-      if (!s.components.some((c) => c.id === action.id)) return state;
-      return commit(
-        state,
-        updateComponent(s, action.id, (c) => ({ ...c, rotation: ((c.rotation + 90) % 360) as Rotation })),
-      );
+    case 'rotate': {
+      const ids = new Set(action.ids.filter((id) => s.components.some((c) => c.id === id)));
+      if (ids.size === 0) return state;
+      return commit(state, {
+        ...s,
+        components: s.components.map((c) =>
+          ids.has(c.id) ? { ...c, rotation: ((c.rotation + 90) % 360) as Rotation } : c,
+        ),
+      });
+    }
     case 'rename': {
       const name = action.name.trim();
       const c = s.components.find((c) => c.id === action.id);
       if (!c || !name || c.name === name) return state;
       return commit(state, updateComponent(s, action.id, (c) => ({ ...c, name })));
+    }
+    case 'setParam': {
+      const c = s.components.find((c) => c.id === action.id);
+      if (!c || !CATALOG[c.type].params.some((p) => p.key === action.key) || c.params?.[action.key] === action.value) {
+        return state;
+      }
+      return commit(
+        state,
+        updateComponent(s, action.id, (c) => ({ ...c, params: { ...c.params, [action.key]: action.value } })),
+      );
+    }
+    case 'setProgram': {
+      const c = s.components.find((c) => c.id === action.id);
+      if (!c || c.type !== 'plc' || c.program === action.program) return state;
+      return commit(state, updateComponent(s, action.id, (c) => ({ ...c, program: action.program })));
     }
     case 'connect': {
       const { a, b } = action;
@@ -98,37 +212,165 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       );
       if (exists) return state;
       const id = nextId('w', s.wires.map((w) => w.id));
-      return commit(state, { ...s, wires: [...s.wires, { id, a, b }] }, { kind: 'wire', id });
+      return commit(state, { ...s, wires: [...s.wires, { id, a, b }] }, selectWire(id));
     }
-    case 'deleteSelection': {
-      const sel = state.selection;
-      if (!sel) return state;
-      if (sel.kind === 'wire') {
-        return commit(state, { ...s, wires: s.wires.filter((w) => w.id !== sel.id) }, null);
-      }
+    case 'connectToWire': {
+      const w = s.wires.find((w) => w.id === action.wire);
+      if (!w) return state;
+      if (sameTerminal(w.a, action.from) || sameTerminal(w.b, action.from)) return state;
+      const host = s.components.find((c) => c.id === w.a.component);
+      const page = host ? pageOf(s, host) : pagesOf(s)[0]!.id;
+      const g = geometryOf({ type: 'junction' });
+      const j = newComponent(s, 'junction', action.x - g.w / 2, action.y - g.h / 2, page);
+      const jt: TerminalRef = { component: j.id, terminal: '1' };
+      const ids = s.wires.map((x) => x.id);
+      const w1 = nextId('w', ids);
+      const w2 = nextId('w', [...ids, w1]);
+      const w3 = nextId('w', [...ids, w1, w2]);
       return commit(
         state,
         {
           ...s,
-          components: s.components.filter((c) => c.id !== sel.id),
-          wires: s.wires.filter((w) => w.a.component !== sel.id && w.b.component !== sel.id),
+          components: [...s.components, j],
+          wires: [
+            ...s.wires.filter((x) => x.id !== w.id),
+            { id: w1, a: w.a, b: jt },
+            { id: w2, a: jt, b: w.b },
+            { id: w3, a: action.from, b: jt },
+          ],
         },
-        null,
+        selectWire(w3),
       );
     }
-    case 'select':
-      return { ...state, selection: action.selection };
+    case 'setWirePoints': {
+      const w = s.wires.find((w) => w.id === action.id);
+      if (!w || (!w.points && !action.points)) return state;
+      return commit(state, {
+        ...s,
+        wires: s.wires.map((x) => {
+          if (x.id !== action.id) return x;
+          const { points: _, ...rest } = x;
+          return action.points ? { ...rest, points: action.points } : rest;
+        }),
+      });
+    }
+    case 'deleteSelection': {
+      const sel = state.selection;
+      if (isEmpty(sel)) return state;
+      const comps = new Set(sel.components);
+      const wires = new Set(sel.wires);
+      const next = pruneJunctions({
+        ...s,
+        components: s.components.filter((c) => !comps.has(c.id)),
+        wires: s.wires.filter((w) => !wires.has(w.id) && !comps.has(w.a.component) && !comps.has(w.b.component)),
+      });
+      return commit(state, next, EMPTY_SELECTION);
+    }
+    case 'select': {
+      const comps = new Set(s.components.map((c) => c.id));
+      const wires = new Set(s.wires.map((w) => w.id));
+      return {
+        ...state,
+        selection: {
+          components: action.selection.components.filter((id) => comps.has(id)),
+          wires: action.selection.wires.filter((id) => wires.has(id)),
+        },
+      };
+    }
+    case 'paste': {
+      const { clip, dx, dy } = action;
+      if (clip.components.length === 0) return state;
+      const usedIds = s.components.map((c) => c.id);
+      const usedWireIds = s.wires.map((w) => w.id);
+      const names = new Set(s.components.map((c) => c.name));
+      const idMap = new Map<string, string>();
+      const components = clip.components.map((src) => {
+        const id = nextId('c', usedIds);
+        usedIds.push(id);
+        idMap.set(src.id, id);
+        // Sayfa geçişleri adlarıyla bağlanır: adları korunur. Diğerleri yeni numara alır.
+        const name = src.type === 'xref' ? src.name : nextName(s, src, names);
+        names.add(name);
+        return { ...structuredClone(src), id, name, x: src.x + dx, y: src.y + dy, page: action.page };
+      });
+      const mapRef = (r: TerminalRef): TerminalRef => ({ component: idMap.get(r.component)!, terminal: r.terminal });
+      const wires = clip.wires
+        .filter((w) => idMap.has(w.a.component) && idMap.has(w.b.component))
+        .map((w) => {
+          const id = nextId('w', usedWireIds);
+          usedWireIds.push(id);
+          const out: Wire = { id, a: mapRef(w.a), b: mapRef(w.b) };
+          if (w.points) out.points = w.points.map((p) => ({ x: p.x + dx, y: p.y + dy }));
+          return out;
+        });
+      return commit(
+        state,
+        { ...s, components: [...s.components, ...components], wires: [...s.wires, ...wires] },
+        { components: components.map((c) => c.id), wires: wires.map((w) => w.id) },
+      );
+    }
+    case 'addPage': {
+      const pages = pagesOf(s);
+      if (pages.some((p) => p.id === action.id)) return state;
+      return commit(state, { ...s, pages: [...pages, { id: action.id, title: action.title }] });
+    }
+    case 'renamePage': {
+      const title = action.title.trim();
+      const pages = pagesOf(s);
+      if (!title || !pages.some((p) => p.id === action.id && p.title !== title)) return state;
+      return commit(state, { ...s, pages: pages.map((p) => (p.id === action.id ? { ...p, title } : p)) });
+    }
+    case 'deletePage': {
+      const pages = pagesOf(s);
+      if (pages.length <= 1 || !pages.some((p) => p.id === action.id)) return state;
+      const gone = new Set(s.components.filter((c) => pageOf(s, c) === action.id).map((c) => c.id));
+      // İlk sayfa silinirse sayfası belirtilmemiş elemanlar yeni ilk sayfaya kayar: sayfayı sabitle.
+      const rest = pages.filter((p) => p.id !== action.id);
+      return commit(
+        state,
+        pruneJunctions({
+          ...s,
+          pages: rest,
+          components: s.components.filter((c) => !gone.has(c.id)).map((c) => ({ ...c, page: pageOf(s, c) })),
+          wires: s.wires.filter((w) => !gone.has(w.a.component) && !gone.has(w.b.component)),
+        }),
+        EMPTY_SELECTION,
+      );
+    }
+    case 'setTitle': {
+      const title = action.title.trim();
+      if (title === (s.title ?? '')) return state;
+      return commit(state, { ...s, title });
+    }
+    case 'defineCustom': {
+      const def = structuredClone(action.def);
+      const library = s.library ?? [];
+      const exists = library.some((d) => d.id === def.id);
+      const next = pruneDanglingWires({
+        ...s,
+        library: exists ? library.map((d) => (d.id === def.id ? def : d)) : [...library, def],
+        components: s.components.map((c) =>
+          c.type === 'custom' && c.custom?.id === def.id ? { ...c, custom: structuredClone(def) } : c,
+        ),
+      });
+      return commit(state, next);
+    }
+    case 'deleteCustom': {
+      if (!s.library?.some((d) => d.id === action.id)) return state;
+      // Şemadaki örnekler tanımlarının kopyasını taşıdığı için çalışmaya devam eder.
+      return commit(state, { ...s, library: s.library.filter((d) => d.id !== action.id) });
+    }
     case 'load':
-      return commit(state, action.schematic, null);
+      return commit(state, action.schematic, EMPTY_SELECTION);
     case 'undo': {
       const prev = state.past[state.past.length - 1];
       if (!prev) return state;
-      return { schematic: prev, selection: null, past: state.past.slice(0, -1), future: [s, ...state.future] };
+      return { schematic: prev, selection: EMPTY_SELECTION, past: state.past.slice(0, -1), future: [s, ...state.future] };
     }
     case 'redo': {
       const next = state.future[0];
       if (!next) return state;
-      return { schematic: next, selection: null, past: [...state.past, s], future: state.future.slice(1) };
+      return { schematic: next, selection: EMPTY_SELECTION, past: [...state.past, s], future: state.future.slice(1) };
     }
   }
 }

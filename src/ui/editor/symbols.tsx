@@ -1,9 +1,12 @@
 // IEC 60617 esinli sembol çizimleri (yerel koordinat). Durum verilirse canlı gösterilir.
 
 import type { ReactNode } from 'react';
-import { PLC_DI, PLC_DQ, type ComponentType } from '../../sim/catalog';
+import { PLC_DI, PLC_DQ, strParam, type CustomDef } from '../../sim/catalog';
+import type { ComponentInstance } from '../../sim/schematic';
 import type { ComponentState } from '../../sim/simulation';
-import { GEOMETRY } from './geometry';
+import { geometryOf } from './geometry';
+
+export type SymbolInstance = Pick<ComponentInstance, 'type' | 'custom' | 'params'>;
 
 interface PoleProps {
   x: number;
@@ -38,9 +41,9 @@ function MushroomActuator({ y }: { y: number }) {
   );
 }
 
-function PushActuator({ y }: { y: number }) {
+function PushActuator({ y, x = 0 }: { y: number; x?: number }) {
   return (
-    <g className="actuator">
+    <g className="actuator" transform={x ? `translate(${x} 0)` : undefined}>
       <path d={`M 7 ${y - 7} L 3 ${y - 7} L 3 ${y + 7} L 7 ${y + 7}`} />
       <line x1={3} y1={y} x2={14} y2={y} strokeDasharray="3 2" />
     </g>
@@ -50,24 +53,32 @@ function PushActuator({ y }: { y: number }) {
 const st = <T extends ComponentState['type']>(s: ComponentState | undefined, t: T) =>
   s?.type === t ? (s as ComponentState & { type: T }) : undefined;
 
-export function SymbolBody({ type, state }: { type: ComponentType; state?: ComponentState }): ReactNode {
-  const g = GEOMETRY[type];
-  switch (type) {
+interface BodyProps {
+  inst: SymbolInstance;
+  state?: ComponentState;
+  /** Sayfa geçişi: aynı etiketli geçişlerin bulunduğu sayfalar ("/2, /3"). */
+  xrefText?: string;
+}
+
+export function SymbolBody({ inst, state, xrefText }: BodyProps): ReactNode {
+  const g = geometryOf(inst);
+  switch (inst.type) {
     case 'mains3':
       return (
         <g>
-          <rect x={4} y={2} width={72} height={26} rx={2} className="box" />
-          <text x={40} y={19} className="sym-text">
-            3~ 400 V
+          <rect x={4} y={2} width={92} height={26} rx={2} className="box" />
+          <text x={50} y={19} className="sym-text">
+            3~/N 400/230 V
           </text>
-          {[20, 40, 60].map((x) => (
+          {[20, 40, 60, 80].map((x) => (
             <line key={x} x1={x} y1={28} x2={x} y2={40} />
           ))}
         </g>
       );
-    case 'psu24':
+    case 'psu24': {
+      const s = st(state, 'psu24');
       return (
-        <g>
+        <g className={s?.limited ? 'tripped' : ''}>
           <rect x={4} y={2} width={52} height={44} rx={2} className="box" />
           <line x1={4} y1={46} x2={56} y2={2} className="thin" />
           <text x={17} y={18} className="sym-text small">
@@ -80,6 +91,7 @@ export function SymbolBody({ type, state }: { type: ComponentType; state?: Compo
           <line x1={40} y1={46} x2={40} y2={60} />
         </g>
       );
+    }
     case 'buttonNO': {
       const s = st(state, 'buttonNO');
       return (
@@ -114,7 +126,7 @@ export function SymbolBody({ type, state }: { type: ComponentType; state?: Compo
       const s = st(state, 'breaker3');
       const closed = s?.closed ?? true;
       return (
-        <g>
+        <g className={s?.tripped ? 'tripped' : ''}>
           <rect x={2} y={6} width={g.w - 4} height={g.h - 12} rx={3} className="frame" />
           {[20, 40, 60].map((x) => (
             <g key={x}>
@@ -127,14 +139,31 @@ export function SymbolBody({ type, state }: { type: ComponentType; state?: Compo
         </g>
       );
     }
+    case 'fuse': {
+      const s = st(state, 'fuse');
+      return (
+        <g className={s?.tripped ? 'tripped' : ''}>
+          <rect x={0} y={0} width={40} height={60} className="hit" />
+          <Pole x={20} yFixed={18} yPivot={42} h={60} closed={s?.closed ?? true} />
+          <path d="M 17 15 l 6 6 m 0 -6 l -6 6" className="thin" />
+          <path d="M 4 26 h 5 v 8 h -5" className="thin" />
+        </g>
+      );
+    }
     case 'lamp': {
       const s = st(state, 'lamp');
+      const color = strParam(inst, 'color');
       return (
-        <g className={s?.lit ? 'lamp-sym lit' : 'lamp-sym'}>
+        <g className={`lamp-sym lamp-${color}${s?.lit ? ' lit' : ''}${s?.fault ? ' tripped' : ''}`}>
           <line x1={20} y1={0} x2={20} y2={18} />
           <circle cx={20} cy={30} r={12} className="bulb" />
           <path d="M 11.5 21.5 L 28.5 38.5 M 28.5 21.5 L 11.5 38.5" />
           <line x1={20} y1={42} x2={20} y2={60} />
+          {strParam(inst, 'voltage') === '230AC' && (
+            <text x={34} y={52} className="sym-text tiny">
+              ~
+            </text>
+          )}
         </g>
       );
     }
@@ -144,6 +173,19 @@ export function SymbolBody({ type, state }: { type: ComponentType; state?: Compo
           <line x1={10} y1={0} x2={10} y2={15} />
           <circle cx={10} cy={20} r={5} className="box" />
           <line x1={10} y1={25} x2={10} y2={40} />
+        </g>
+      );
+    case 'junction':
+      return <circle cx={10} cy={10} r={3.5} className="junction-dot" />;
+    case 'xref':
+      return (
+        <g>
+          <path d="M 0 10 L 10 2 H 58 V 18 H 10 Z" className="box" />
+          {xrefText && (
+            <text x={34} y={14} className="sym-text tiny">
+              {xrefText}
+            </text>
+          )}
         </g>
       );
     case 'contactor': {
@@ -158,8 +200,19 @@ export function SymbolBody({ type, state }: { type: ComponentType; state?: Compo
           <Pole x={100} yFixed={26} yPivot={54} h={80} closed={!closed} nc />
           <line x1={12} y1={40} x2={104} y2={40} strokeDasharray="4 3" className="thin" />
           <line x1={120} y1={0} x2={120} y2={28} />
-          <rect x={110} y={28} width={20} height={24} className={s?.coilEnergized ? 'coil on' : 'coil'} />
+          <rect
+            x={110}
+            y={28}
+            width={20}
+            height={24}
+            className={s?.coilEnergized ? 'coil on' : s?.fault ? 'coil fault' : 'coil'}
+          />
           <line x1={120} y1={52} x2={120} y2={80} />
+          {strParam(inst, 'coilVoltage') === '230AC' && (
+            <text x={120} y={44} className="sym-text tiny">
+              ~
+            </text>
+          )}
         </g>
       );
     }
@@ -226,15 +279,76 @@ export function SymbolBody({ type, state }: { type: ComponentType; state?: Compo
         </g>
       );
     }
+    case 'custom':
+      return <CustomBody def={inst.custom} state={st(state, 'custom')} w={g.w} />;
   }
 }
 
+/** Kullanıcı bileşeni: kutup türüne göre kontak, bobin, lamba veya köprü; ortak çerçeve. */
+function CustomBody({ def, state, w }: { def?: CustomDef; state?: ComponentState & { type: 'custom' }; w: number }) {
+  const poles = def?.poles ?? [];
+  const xs = (kinds: string[]) => poles.flatMap((p, i) => (kinds.includes(p.kind) ? [20 + i * 20] : []));
+  const contactXs = xs(['NO', 'NC']);
+  const pushXs = xs(['pushNO', 'pushNC']);
+  return (
+    <g className={state?.fault ? 'tripped' : state?.pressed ? 'pressed' : ''}>
+      <rect x={0} y={0} width={w} height={80} className="hit" />
+      <rect x={2} y={6} width={w - 4} height={68} rx={3} className="frame" />
+      {poles.map((p, i) => {
+        const x = 20 + i * 20;
+        const on = state?.poles[i];
+        switch (p.kind) {
+          case 'link':
+            return <line key={i} x1={x} y1={0} x2={x} y2={80} />;
+          case 'NO':
+          case 'pushNO':
+            return <Pole key={i} x={x} yFixed={26} yPivot={54} h={80} closed={on ?? false} />;
+          case 'NC':
+          case 'pushNC':
+            return <Pole key={i} x={x} yFixed={26} yPivot={54} h={80} closed={on ?? true} nc />;
+          case 'coil':
+            return (
+              <g key={i}>
+                <line x1={x} y1={0} x2={x} y2={28} />
+                <rect x={x - 7} y={28} width={14} height={24} className={on ? 'coil on' : 'coil'} />
+                <line x1={x} y1={52} x2={x} y2={80} />
+              </g>
+            );
+          case 'lamp':
+            return (
+              <g key={i} className={on ? 'lamp-sym lamp-yellow lit' : 'lamp-sym lamp-yellow'}>
+                <line x1={x} y1={0} x2={x} y2={32} />
+                <circle cx={x} cy={40} r={8} className="bulb" />
+                <path d={`M ${x - 5.5} 34.5 L ${x + 5.5} 45.5 M ${x + 5.5} 34.5 L ${x - 5.5} 45.5`} />
+                <line x1={x} y1={48} x2={x} y2={80} />
+              </g>
+            );
+        }
+      })}
+      {contactXs.length > 1 && (
+        <line
+          x1={contactXs[0]! - 6}
+          y1={40}
+          x2={contactXs[contactXs.length - 1]! - 6}
+          y2={40}
+          strokeDasharray="4 3"
+          className="thin"
+        />
+      )}
+      {pushXs.length > 0 && <PushActuator y={40} x={pushXs[0]! - 20} />}
+      <text x={w - 6} y={16} className="sym-text tiny" textAnchor="end">
+        {def?.title ?? ''}
+      </text>
+    </g>
+  );
+}
+
 /** Kütüphane önizlemesi: sembolü verilen kutuya sığdırır. */
-export function SymbolPreview({ type, width = 64, height = 48 }: { type: ComponentType; width?: number; height?: number }) {
-  const g = GEOMETRY[type];
+export function SymbolPreview({ inst, width = 64, height = 48 }: { inst: SymbolInstance; width?: number; height?: number }) {
+  const g = geometryOf(inst);
   return (
     <svg viewBox={`-6 -6 ${g.w + 12} ${g.h + 12}`} width={width} height={height} className="preview" aria-hidden>
-      <SymbolBody type={type} />
+      <SymbolBody inst={inst} />
       {g.terminals.map((t) => (
         <circle key={t.name} cx={t.x} cy={t.y} r={3} className="terminal" />
       ))}

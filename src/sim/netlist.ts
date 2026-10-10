@@ -2,7 +2,7 @@
 // Kablolar ve kapalı iç kontaklar terminalleri union-find ile aynı nete birleştirir;
 // kaynaklar netlere potansiyel etiketi verir. Bir nette iki farklı etiket = kısa devre.
 
-export type Potential = 'P24' | 'M0' | 'L1' | 'L2' | 'L3';
+export type Potential = 'P24' | 'M0' | 'L1' | 'L2' | 'L3' | 'N';
 export type NetPotential = Potential | 'short' | null;
 
 export interface NetResult {

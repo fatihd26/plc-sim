@@ -2,15 +2,26 @@
 // Devre bir şema dokümanından kurulur; bağlantılar her tick'te NetSolver ile çözülür.
 // UI'dan bağımsızdır: dışarıya yalnız komut kuyruğu (giriş) ve snapshot (çıkış) açar.
 
-import { CATALOG, PLC_DI, PLC_DQ, type ComponentType } from './catalog';
+import {
+  numParam,
+  PLC_DI,
+  PLC_DQ,
+  strParam,
+  terminalsOf,
+  type CustomDef,
+  type Voltage,
+} from './catalog';
 import { Contactor, Motor, PushButton, ThermalRelay } from './devices';
 import type { LadderProgram, LadderTrace } from './ladder';
 import { NetSolver, type NetPotential, type NetResult, type Potential } from './netlist';
 import { Plc } from './plc';
 import { startStopProgram } from './programs';
-import { terminalKey, validateSchematic, type Schematic } from './schematic';
+import { terminalKey, validateSchematic, type ComponentInstance, type Schematic } from './schematic';
 
 export const TICK_MS = 1;
+
+/** Olay günlüğünde tutulan en fazla kayıt. */
+const MAX_EVENTS = 20;
 
 export type SimCommand =
   | { type: 'button'; component: string; pressed: boolean }
@@ -23,23 +34,39 @@ export interface LoggedCommand {
   command: SimCommand;
 }
 
+/** Şemadaki değerleri geçersiz kılan ayarlar (testler ve deneyler için). */
 export interface SimConfig {
-  /** PLC scan periyodu [ms]; tick'in tam katı olmalı. */
-  scanTimeMs: number;
-  /** Tüm PLC'lere yüklenen program. */
-  program: LadderProgram;
+  /** Tüm PLC'lerin scan periyodu [ms]; tick'in tam katı olmalı. Yoksa PLC parametresi. */
+  scanTimeMs?: number;
+  /** Tüm PLC'lere yüklenen program. Yoksa her PLC kendi programını çalıştırır. */
+  program?: LadderProgram;
 }
 
-export const DEFAULT_CONFIG: SimConfig = { scanTimeMs: 10, program: startStopProgram };
+/** Yükün (bobin/lamba) gördüğü besleme. */
+export type Supply = 'DC24' | 'AC230' | 'AC400' | null;
+
+export interface SimEvent {
+  tick: number;
+  component: string;
+  text: string;
+}
 
 export type ComponentState =
-  | { type: 'mains3' }
-  | { type: 'psu24' }
+  | { type: 'mains3' | 'terminal' | 'junction' | 'xref' }
+  | { type: 'psu24'; limited: boolean }
   | { type: 'buttonNO' | 'buttonNC' | 'estop'; pressed: boolean; contactClosed: boolean }
-  | { type: 'contactor'; coilEnergized: boolean; closed: boolean }
-  | { type: 'breaker3'; closed: boolean }
-  | { type: 'lamp'; lit: boolean }
-  | { type: 'terminal' }
+  | { type: 'contactor'; coilEnergized: boolean; closed: boolean; fault: string | null }
+  | {
+      type: 'breaker3';
+      closed: boolean;
+      tripped: boolean;
+      theta: number;
+      tripTheta: number;
+      setCurrentA: number;
+      currentA: number;
+    }
+  | { type: 'fuse'; closed: boolean; tripped: boolean }
+  | { type: 'lamp'; lit: boolean; fault: string | null }
   | { type: 'thermal'; tripped: boolean; theta: number; tripTheta: number; setCurrentA: number; currentA: number }
   | {
       type: 'motor3';
@@ -63,6 +90,16 @@ export type ComponentState =
       piq: boolean[];
       dqTerminals: boolean[];
       trace: LadderTrace;
+    }
+  | {
+      type: 'custom';
+      pressed: boolean;
+      coilEnergized: boolean;
+      /** Bobinle çalışan kontakların durumu (çekili mi). */
+      actuated: boolean;
+      /** Kutup başına: kontak iletimde mi / bobin-lamba enerjili mi. */
+      poles: boolean[];
+      fault: string | null;
     };
 
 /** UI'ya verilen, salt-okunur ve kopyalanmış durum. */
@@ -74,55 +111,125 @@ export interface SimSnapshot {
   potentials: Record<string, NetPotential>;
   /** Kısa devre olan netler ("bileşen:terminal" listeleri). */
   shorts: string[][];
+  /** Koruma açmaları gibi olaylar (en yenisi sonda). */
+  events: SimEvent[];
 }
 
 type Device =
-  | { type: 'mains3' }
-  | { type: 'psu24' }
+  | { type: 'mains3' | 'terminal' | 'junction' | 'xref' }
+  | { type: 'psu24'; limited: boolean }
   | { type: 'buttonNO' | 'buttonNC' | 'estop'; button: PushButton }
-  | { type: 'contactor'; contactor: Contactor }
-  | { type: 'breaker3'; closed: boolean }
-  | { type: 'lamp'; lit: boolean }
-  | { type: 'terminal' }
+  | { type: 'contactor'; contactor: Contactor; voltage: Voltage; fault: string | null }
+  | { type: 'breaker3'; closed: boolean; tripped: boolean; relay: ThermalRelay; currentA: number }
+  | { type: 'fuse'; closed: boolean; tripped: boolean }
+  | { type: 'lamp'; lit: boolean; voltage: Voltage; fault: string | null }
   | { type: 'thermal'; relay: ThermalRelay; currentA: number }
   | { type: 'motor3'; motor: Motor }
-  | { type: 'plc'; plc: Plc; powered: boolean };
+  | { type: 'plc'; plc: Plc; powered: boolean; scanTimeMs: number }
+  | {
+      type: 'custom';
+      def: CustomDef;
+      pressed: boolean;
+      relay: Contactor;
+      poles: boolean[];
+      fault: string | null;
+    };
 
 interface Entry {
   id: string;
+  name: string;
   device: Device;
   /** Terminal adı → global terminal indeksi. */
   t: Record<string, number>;
 }
 
 const PHASES: Potential[] = ['L1', 'L2', 'L3'];
+const isPhase = (p: NetPotential) => p === 'L1' || p === 'L2' || p === 'L3';
 
-function createDevice(type: ComponentType, config: SimConfig): Device {
-  switch (type) {
+/** İki uç arasındaki beslemenin türü (mantıksal; akım hesaplanmaz). */
+export function supplyBetween(a: NetPotential, b: NetPotential): Supply {
+  if ((a === 'P24' && b === 'M0') || (a === 'M0' && b === 'P24')) return 'DC24';
+  if ((isPhase(a) && b === 'N') || (a === 'N' && isPhase(b))) return 'AC230';
+  if (isPhase(a) && isPhase(b) && a !== b) return 'AC400';
+  return null;
+}
+
+/** Anma gerilimi verilen yük: çeker/yanar mı, aşırı gerilim var mı. */
+export function loadResponse(rating: Voltage, supply: Supply): { on: boolean; fault: string | null } {
+  if (rating === '24DC') {
+    return { on: supply === 'DC24', fault: supply === 'AC230' || supply === 'AC400' ? 'Aşırı gerilim (AC)' : null };
+  }
+  return { on: supply === 'AC230', fault: supply === 'AC400' ? 'Aşırı gerilim (400 V)' : null };
+}
+
+function createDevice(c: ComponentInstance, config: SimConfig): Device {
+  switch (c.type) {
     case 'mains3':
-    case 'psu24':
     case 'terminal':
-      return { type };
+    case 'junction':
+    case 'xref':
+      return { type: c.type };
+    case 'psu24':
+      return { type: c.type, limited: false };
     case 'buttonNO':
-      return { type, button: new PushButton('NO') };
+      return { type: c.type, button: new PushButton('NO') };
     case 'buttonNC':
     case 'estop':
-      return { type, button: new PushButton('NC') };
+      return { type: c.type, button: new PushButton('NC') };
     case 'contactor':
-      return { type, contactor: new Contactor() };
+      return {
+        type: c.type,
+        contactor: new Contactor({ pickupMs: numParam(c, 'pickupMs'), dropoutMs: numParam(c, 'dropoutMs') }),
+        voltage: strParam(c, 'coilVoltage') as Voltage,
+        fault: null,
+      };
     case 'breaker3':
-      // Şalter kapalı teslim edilir; kullanıcı elle açabilir.
-      return { type, closed: true };
+      // Şalter kapalı teslim edilir; kullanıcı elle açabilir, koruma kendiliğinden açar.
+      return {
+        type: c.type,
+        closed: true,
+        tripped: false,
+        relay: new ThermalRelay({ setCurrentA: numParam(c, 'setCurrentA'), tauMs: numParam(c, 'tauS') * 1000 }),
+        currentA: 0,
+      };
+    case 'fuse':
+      return { type: c.type, closed: true, tripped: false };
     case 'lamp':
-      return { type, lit: false };
+      return { type: c.type, lit: false, voltage: strParam(c, 'voltage') as Voltage, fault: null };
     case 'thermal':
-      return { type, relay: new ThermalRelay(), currentA: 0 };
+      return {
+        type: c.type,
+        relay: new ThermalRelay({ setCurrentA: numParam(c, 'setCurrentA'), tauMs: numParam(c, 'tauS') * 1000 }),
+        currentA: 0,
+      };
     case 'motor3':
-      return { type, motor: new Motor() };
+      return {
+        type: c.type,
+        motor: new Motor({
+          ratedCurrentA: numParam(c, 'ratedCurrentA'),
+          ratedRpm: numParam(c, 'ratedRpm'),
+          startTauMs: numParam(c, 'startTauMs'),
+          coastTauMs: numParam(c, 'coastTauMs'),
+          lockedRotorRatio: numParam(c, 'lockedRotorRatio'),
+          loadPct: numParam(c, 'loadPct'),
+        }),
+      };
     case 'plc':
-      return { type, plc: new Plc(config.program), powered: false };
+      return {
+        type: c.type,
+        plc: new Plc(config.program ?? c.program ?? startStopProgram),
+        powered: false,
+        scanTimeMs: config.scanTimeMs ?? Math.round(numParam(c, 'scanTimeMs')),
+      };
+    case 'custom': {
+      const def = c.custom!;
+      return { type: c.type, def, pressed: false, relay: new Contactor(), poles: def.poles.map(() => false), fault: null };
+    }
   }
 }
+
+/** Kısa devrede açarak arızayı ayırabilen elemanlar. */
+type Protective = Extract<Device, { type: 'breaker3' | 'fuse' | 'psu24' }>;
 
 export class Simulation {
   readonly config: SimConfig;
@@ -132,6 +239,7 @@ export class Simulation {
   private readonly terminalKeys: string[] = [];
   private readonly wirePairs: [number, number][] = [];
   private readonly solver: NetSolver;
+  private readonly events: SimEvent[] = [];
 
   /** Tamamlanmış tick sayısı (= simülasyon zamanı, ms). */
   tick = 0;
@@ -139,30 +247,41 @@ export class Simulation {
   readonly log: LoggedCommand[] = [];
   private queue: SimCommand[] = [];
 
-  constructor(schematic: Schematic, config: Partial<SimConfig> = {}) {
-    this.config = { ...DEFAULT_CONFIG, ...config };
-    if (!Number.isInteger(this.config.scanTimeMs / TICK_MS) || this.config.scanTimeMs <= 0) {
-      throw new Error(`scanTimeMs tick süresinin pozitif tam katı olmalı: ${this.config.scanTimeMs}`);
+  constructor(schematic: Schematic, config: SimConfig = {}) {
+    this.config = { ...config };
+    const scan = this.config.scanTimeMs;
+    if (scan !== undefined && (!Number.isInteger(scan / TICK_MS) || scan <= 0)) {
+      throw new Error(`scanTimeMs tick süresinin pozitif tam katı olmalı: ${scan}`);
     }
     const errors = validateSchematic(schematic);
     if (errors.length) throw new Error(`Geçersiz şema:\n${errors.join('\n')}`);
     this.schematic = structuredClone(schematic);
 
     const index = new Map<string, number>();
+    const xrefs = new Map<string, number[]>();
     for (const c of this.schematic.components) {
       const t: Record<string, number> = {};
-      for (const name of CATALOG[c.type].terminals) {
+      for (const name of terminalsOf(c)) {
         const key = terminalKey({ component: c.id, terminal: name });
         t[name] = this.terminalKeys.length;
         index.set(key, this.terminalKeys.length);
         this.terminalKeys.push(key);
       }
-      const entry: Entry = { id: c.id, device: createDevice(c.type, this.config), t };
+      const entry: Entry = { id: c.id, name: c.name, device: createDevice(c, this.config), t };
       this.entries.push(entry);
       this.byId.set(c.id, entry);
+      if (c.type === 'xref') {
+        const list = xrefs.get(c.name) ?? [];
+        list.push(t['1']!);
+        xrefs.set(c.name, list);
+      }
     }
     for (const w of this.schematic.wires) {
       this.wirePairs.push([index.get(terminalKey(w.a))!, index.get(terminalKey(w.b))!]);
+    }
+    // Aynı etiketli sayfa geçişleri görünmez bir kabloyla bağlıdır.
+    for (const list of xrefs.values()) {
+      for (let i = 1; i < list.length; i++) this.wirePairs.push([list[0]!, list[i]!]);
     }
     this.solver = new NetSolver(this.terminalKeys.length);
   }
@@ -181,9 +300,8 @@ export class Simulation {
     }
     this.queue = [];
 
-    // 2. Bağlantıları çöz → PLC girişleri, besleme ve scan
-    let nets = this.solveNets();
-    const scanDue = this.tick % (this.config.scanTimeMs / TICK_MS) === 0;
+    // 2. Bağlantıları çöz (kısa devre varsa koruma açar) → PLC girişleri, besleme ve scan
+    let nets = this.protect(this.solveNets());
     for (const e of this.entries) {
       if (e.device.type !== 'plc') continue;
       const d = e.device;
@@ -195,19 +313,33 @@ export class Simulation {
       }
       d.powered = true;
       PLC_DI.forEach((name, i) => (d.plc.diTerminals[i] = nets.potential(e.t[name]!) === 'P24'));
-      if (scanDue) d.plc.scan();
+      if (this.tick % (d.scanTimeMs / TICK_MS) === 0) d.plc.scan();
     }
 
     // 3. PLC çıkışları değişmiş olabilir: bobinler ve motorlar güncel netleri görsün
-    nets = this.solveNets();
+    nets = this.protect(this.solveNets());
+    const supply = (e: Entry, a: string, b: string) => supplyBetween(nets.potential(e.t[a]!), nets.potential(e.t[b]!));
 
-    // 4. Kontaktör bobinleri (24 V DC, iki yönde de çeker)
+    // 4. Bobinler (anma geriliminde çeker; DC iki yönde de)
     for (const e of this.entries) {
-      if (e.device.type !== 'contactor') continue;
-      const a1 = nets.potential(e.t['A1']!);
-      const a2 = nets.potential(e.t['A2']!);
-      const energized = (a1 === 'P24' && a2 === 'M0') || (a1 === 'M0' && a2 === 'P24');
-      e.device.contactor.update(energized, TICK_MS);
+      const d = e.device;
+      if (d.type === 'contactor') {
+        const r = loadResponse(d.voltage, supply(e, 'A1', 'A2'));
+        d.fault = r.fault;
+        d.contactor.update(r.on, TICK_MS);
+      } else if (d.type === 'custom') {
+        let energized = false;
+        let fault: string | null = null;
+        d.def.poles.forEach((p, i) => {
+          if (p.kind !== 'coil' && p.kind !== 'lamp') return;
+          const r = loadResponse(d.def.voltage, supply(e, p.top, p.bottom));
+          d.poles[i] = r.on;
+          fault ??= r.fault;
+          if (p.kind === 'coil' && r.on) energized = true;
+        });
+        d.fault = fault;
+        d.relay.update(energized, TICK_MS);
+      }
     }
 
     // 5. Motorlar: üç farklı faz gerekir; faz sırası yönü belirler
@@ -220,25 +352,33 @@ export class Simulation {
       e.device.motor.update(powered, TICK_MS, powered ? direction : e.device.motor.direction);
     }
 
-    // 6. Termik röleler: ana kutuplarıyla aynı nette olan motorların akımını taşır
+    // 6. Termik elemanlar: ana kutuplarıyla aynı nette olan motorların akımını taşır
     for (const e of this.entries) {
-      if (e.device.type !== 'thermal') continue;
+      const d = e.device;
+      if (d.type !== 'thermal' && d.type !== 'breaker3') continue;
       const poleNets = new Set(['2', '4', '6'].map((n) => nets.netOf(e.t[n]!)));
       let current = 0;
       for (const m of this.entries) {
         if (m.device.type !== 'motor3') continue;
         if (['U', 'V', 'W'].some((n) => poleNets.has(nets.netOf(m.t[n]!)))) current += m.device.motor.currentA;
       }
-      e.device.currentA = current;
-      e.device.relay.update(current, TICK_MS);
+      d.currentA = current;
+      const wasTripped = d.relay.tripped;
+      d.relay.update(current, TICK_MS);
+      if (d.type === 'breaker3' && d.relay.tripped && !wasTripped) {
+        d.closed = false;
+        d.tripped = true;
+        this.event(e, `aşırı akımda açtı (I = ${current.toFixed(1)} A, Ir = ${d.relay.params.setCurrentA} A)`);
+      }
     }
 
-    // 7. Sinyal lambaları (24 V DC, iki yönde de yanar)
+    // 7. Sinyal lambaları
     for (const e of this.entries) {
-      if (e.device.type !== 'lamp') continue;
-      const x1 = nets.potential(e.t['X1']!);
-      const x2 = nets.potential(e.t['X2']!);
-      e.device.lit = (x1 === 'P24' && x2 === 'M0') || (x1 === 'M0' && x2 === 'P24');
+      const d = e.device;
+      if (d.type !== 'lamp') continue;
+      const r = loadResponse(d.voltage, supply(e, 'X1', 'X2'));
+      d.lit = r.on;
+      d.fault = r.fault;
     }
 
     this.tick++;
@@ -250,9 +390,71 @@ export class Simulation {
 
   /** Bir sonraki PLC scan'i dahil olmak üzere ilerle (enerjili PLC yoksa bir scan süresi). */
   stepScan(): void {
-    const period = this.config.scanTimeMs / TICK_MS;
-    do this.step();
-    while (this.tick % period !== 1 % period);
+    const plcs = this.entries.flatMap((e) => (e.device.type === 'plc' ? [e.device] : []));
+    const counts = plcs.map((d) => d.plc.scanCount);
+    const limit = Math.max(10, ...plcs.map((d) => d.scanTimeMs)) / TICK_MS;
+    for (let i = 0; i < limit; i++) {
+      this.step();
+      if (plcs.some((d, j) => d.plc.scanCount !== counts[j])) return;
+    }
+  }
+
+  private event(e: Entry, text: string): void {
+    this.events.push({ tick: this.tick, component: e.id, text: `${e.name}: ${text}` });
+    if (this.events.length > MAX_EVENTS) this.events.shift();
+  }
+
+  /**
+   * Kısa devre koruması. Arızayı tek başına ayırabilen koruma elemanları denenir; bunlardan
+   * açıldığında devrenin en büyük kısmını enerjili bırakan (arızaya en yakın olan) açtırılır.
+   * Arıza kalkınca akım sınırlamasındaki güç kaynakları kendiliğinden toparlanır.
+   */
+  private protect(nets: NetResult): NetResult {
+    // Akım sınırlamasındaki kaynaklar: arıza kalktıysa çıkış geri gelir.
+    for (const e of this.entries) {
+      const d = e.device;
+      if (d.type !== 'psu24' || !d.limited) continue;
+      d.limited = false;
+      const trial = this.solveNets();
+      if (trial.shorts.length > nets.shorts.length) d.limited = true;
+      else {
+        nets = trial;
+        this.event(e, 'kısa devre giderildi, çıkış geri geldi');
+      }
+    }
+
+    for (let guard = 0; nets.shorts.length > 0 && guard < 16; guard++) {
+      let best: { entry: Entry; device: Protective; nets: NetResult; score: number } | null = null;
+      for (const e of this.entries) {
+        const d = e.device;
+        if (!(d.type === 'breaker3' || d.type === 'fuse' ? d.closed : d.type === 'psu24' && !d.limited)) continue;
+        const dev = d as Protective;
+        this.setOpen(dev, true);
+        const trial = this.solveNets();
+        this.setOpen(dev, false);
+        if (trial.shorts.length >= nets.shorts.length) continue;
+        let score = 0;
+        for (let i = 0; i < this.terminalKeys.length; i++) {
+          const p = trial.potential(i);
+          if (p && p !== 'short') score++;
+        }
+        if (!best || score > best.score) best = { entry: e, device: dev, nets: trial, score };
+      }
+      if (!best) break;
+      this.setOpen(best.device, true);
+      if (best.device.type === 'psu24') this.event(best.entry, 'kısa devre: çıkış akım sınırlamasında (kapalı)');
+      else {
+        best.device.tripped = true;
+        this.event(best.entry, 'kısa devrede açtı');
+      }
+      nets = best.nets;
+    }
+    return nets;
+  }
+
+  private setOpen(d: Protective, open: boolean): void {
+    if (d.type === 'psu24') d.limited = open;
+    else d.closed = !open;
   }
 
   /** Mevcut cihaz durumlarına göre bağlantıları çözer (yan etkisiz). */
@@ -269,10 +471,13 @@ export class Simulation {
           s.addSource(t['L1']!, 'L1');
           s.addSource(t['L2']!, 'L2');
           s.addSource(t['L3']!, 'L3');
+          s.addSource(t['N']!, 'N');
           break;
         case 'psu24':
-          s.addSource(t['L+']!, 'P24');
-          s.addSource(t['M']!, 'M0');
+          if (!d.limited) {
+            s.addSource(t['L+']!, 'P24');
+            s.addSource(t['M']!, 'M0');
+          }
           break;
         case 'buttonNO':
           if (d.button.contactClosed) link('13', '14');
@@ -288,10 +493,16 @@ export class Simulation {
             link('5', '6');
           }
           break;
+        case 'fuse':
+          if (d.closed) link('1', '2');
+          break;
         case 'terminal':
           link('1', '2');
           break;
         case 'lamp':
+        case 'junction':
+        case 'xref':
+        case 'motor3':
           break;
         case 'contactor':
           if (d.contactor.closed) {
@@ -310,8 +521,6 @@ export class Simulation {
           if (d.relay.tripped) link('97', '98');
           else link('95', '96');
           break;
-        case 'motor3':
-          break;
         case 'plc':
           if (d.powered) {
             PLC_DQ.forEach((name, i) => {
@@ -319,20 +528,53 @@ export class Simulation {
             });
           }
           break;
+        case 'custom':
+          for (const p of d.def.poles) if (this.customPoleClosed(d, p.kind)) link(p.top, p.bottom);
+          break;
       }
     }
     return s.solve();
   }
 
+  /** Kontak türündeki kutbun iletimde olup olmadığı; bobin/lamba için null. */
+  private customPoleClosed(d: Extract<Device, { type: 'custom' }>, kind: CustomDef['poles'][number]['kind']): boolean | null {
+    switch (kind) {
+      case 'link':
+        return true;
+      case 'pushNO':
+        return d.pressed;
+      case 'pushNC':
+        return !d.pressed;
+      case 'NO':
+        return d.relay.closed;
+      case 'NC':
+        return !d.relay.closed;
+      default:
+        return null;
+    }
+  }
+
   private apply(command: SimCommand): void {
-    const d = this.byId.get(command.component)?.device;
-    if (!d) return;
+    const e = this.byId.get(command.component);
+    const d = e?.device;
+    if (!e || !d) return;
     switch (command.type) {
       case 'button':
         if (d.type === 'buttonNO' || d.type === 'buttonNC' || d.type === 'estop') d.button.pressed = command.pressed;
+        else if (d.type === 'custom') d.pressed = command.pressed;
         break;
       case 'switch':
-        if (d.type === 'breaker3') d.closed = command.closed;
+        if (d.type === 'fuse') {
+          d.closed = command.closed;
+          if (command.closed) d.tripped = false;
+        } else if (d.type === 'breaker3') {
+          if (!command.closed) d.closed = false;
+          else if (d.relay.tripped && !d.relay.reset()) this.event(e, 'henüz soğumadı, kapatılamıyor');
+          else {
+            d.closed = true;
+            d.tripped = false;
+          }
+        }
         break;
       case 'thermalTest':
         if (d.type === 'thermal') d.relay.test();
@@ -346,19 +588,32 @@ export class Simulation {
   private componentState(d: Device): ComponentState {
     switch (d.type) {
       case 'mains3':
-      case 'psu24':
       case 'terminal':
+      case 'junction':
+      case 'xref':
         return { type: d.type };
+      case 'psu24':
+        return { type: d.type, limited: d.limited };
       case 'buttonNO':
       case 'buttonNC':
       case 'estop':
         return { type: d.type, pressed: d.button.pressed, contactClosed: d.button.contactClosed };
       case 'breaker3':
-        return { type: d.type, closed: d.closed };
+        return {
+          type: d.type,
+          closed: d.closed,
+          tripped: d.tripped,
+          theta: d.relay.theta,
+          tripTheta: ThermalRelay.TRIP_THETA,
+          setCurrentA: d.relay.params.setCurrentA,
+          currentA: d.currentA,
+        };
+      case 'fuse':
+        return { type: d.type, closed: d.closed, tripped: d.tripped };
       case 'lamp':
-        return { type: d.type, lit: d.lit };
+        return { type: d.type, lit: d.lit, fault: d.fault };
       case 'contactor':
-        return { type: d.type, coilEnergized: d.contactor.coilEnergized, closed: d.contactor.closed };
+        return { type: d.type, coilEnergized: d.contactor.coilEnergized, closed: d.contactor.closed, fault: d.fault };
       case 'thermal':
         return {
           type: d.type,
@@ -386,7 +641,7 @@ export class Simulation {
         return {
           type: d.type,
           powered: d.powered,
-          scanTimeMs: this.config.scanTimeMs,
+          scanTimeMs: d.scanTimeMs,
           scanCount: p.scanCount,
           diTerminals: p.diTerminals.slice(0, PLC_DI.length),
           pii: p.imageCopy('I').slice(0, PLC_DI.length),
@@ -395,6 +650,15 @@ export class Simulation {
           trace: structuredClone(p.lastTrace),
         };
       }
+      case 'custom':
+        return {
+          type: d.type,
+          pressed: d.pressed,
+          coilEnergized: d.relay.coilEnergized,
+          actuated: d.relay.closed,
+          poles: d.def.poles.map((p, i) => this.customPoleClosed(d, p.kind) ?? d.poles[i]!),
+          fault: d.fault,
+        };
     }
   }
 
@@ -410,6 +674,7 @@ export class Simulation {
       components,
       potentials,
       shorts: nets.shorts.map((net) => net.map((i) => this.terminalKeys[i]!)),
+      events: this.events.map((ev) => ({ ...ev })),
     };
   }
 }
@@ -419,7 +684,7 @@ export function replay(
   schematic: Schematic,
   log: readonly LoggedCommand[],
   totalTicks: number,
-  config?: Partial<SimConfig>,
+  config?: SimConfig,
 ): Simulation {
   const sim = new Simulation(schematic, config);
   let i = 0;

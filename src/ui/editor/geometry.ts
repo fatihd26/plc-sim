@@ -1,22 +1,22 @@
 // Sembol geometrisi: her tipin boyutu ve terminal konumları (yerel koordinat, ızgara = 10).
-// Terminal adları çekirdek kataloğuyla birebir eşleşmelidir (geometry.test.ts denetler).
+// Terminal adları çekirdek kataloğuyla birebir eşleşmelidir (editor.test.ts denetler).
+// Kullanıcı tanımlı bileşenlerin geometrisi tanımlarından türetilir.
 
-import { CATALOG, PLC_DI, PLC_DQ, type ComponentType } from '../../sim/catalog';
-import type { ComponentInstance, Rotation, TerminalRef } from '../../sim/schematic';
+import { CATALOG, PLC_DI, PLC_DQ, terminalsOf, type ComponentType, type CustomDef } from '../../sim/catalog';
+import type { ComponentInstance, Point, Rotation, TerminalRef } from '../../sim/schematic';
+
+export type { Point };
 
 export const GRID = 10;
 export const snap = (v: number) => Math.round(v / GRID) * GRID;
 
 export type Dir = 'up' | 'down' | 'left' | 'right';
 
-export interface Point {
-  x: number;
-  y: number;
-}
-
 export interface TerminalGeo extends Point {
   name: string;
   dir: Dir;
+  /** Yönsüz uç (bağlantı noktası): kablo her yönden girebilir, çıkış payı yoktur. */
+  free?: boolean;
 }
 
 export interface SymbolGeo {
@@ -25,11 +25,17 @@ export interface SymbolGeo {
   terminals: TerminalGeo[];
 }
 
+type BuiltinType = Exclude<ComponentType, 'custom'>;
+
 const top = (name: string, x: number): TerminalGeo => ({ name, x, y: 0, dir: 'up' });
 const bottom = (name: string, x: number, h: number): TerminalGeo => ({ name, x, y: h, dir: 'down' });
 
-export const GEOMETRY: Record<ComponentType, SymbolGeo> = {
-  mains3: { w: 80, h: 40, terminals: [bottom('L1', 20, 40), bottom('L2', 40, 40), bottom('L3', 60, 40)] },
+export const GEOMETRY: Record<BuiltinType, SymbolGeo> = {
+  mains3: {
+    w: 100,
+    h: 40,
+    terminals: [bottom('L1', 20, 40), bottom('L2', 40, 40), bottom('L3', 60, 40), bottom('N', 80, 40)],
+  },
   psu24: { w: 60, h: 60, terminals: [bottom('L+', 20, 60), bottom('M', 40, 60)] },
   buttonNO: { w: 40, h: 60, terminals: [top('13', 20), bottom('14', 20, 60)] },
   buttonNC: { w: 40, h: 60, terminals: [top('11', 20), bottom('12', 20, 60)] },
@@ -39,8 +45,11 @@ export const GEOMETRY: Record<ComponentType, SymbolGeo> = {
     h: 80,
     terminals: [['1', '2'], ['3', '4'], ['5', '6']].flatMap(([t, b], i) => [top(t!, 20 + i * 20), bottom(b!, 20 + i * 20, 80)]),
   },
+  fuse: { w: 40, h: 60, terminals: [top('1', 20), bottom('2', 20, 60)] },
   lamp: { w: 40, h: 60, terminals: [top('X1', 20), bottom('X2', 20, 60)] },
   terminal: { w: 20, h: 40, terminals: [top('1', 10), bottom('2', 10, 40)] },
+  junction: { w: 20, h: 20, terminals: [{ name: '1', x: 10, y: 10, dir: 'up', free: true }] },
+  xref: { w: 60, h: 20, terminals: [{ name: '1', x: 0, y: 10, dir: 'left' }] },
   contactor: {
     w: 140,
     h: 80,
@@ -74,6 +83,23 @@ export const GEOMETRY: Record<ComponentType, SymbolGeo> = {
   },
 };
 
+/** Kullanıcı bileşeni: kutuplar 20 aralıkla yan yana; üst/alt terminal çiftleri. */
+export function customGeometry(def: CustomDef | undefined): SymbolGeo {
+  const poles = def?.poles ?? [];
+  const w = Math.max(40, 20 * (poles.length + 1));
+  return {
+    w,
+    h: 80,
+    terminals: poles.flatMap((p, i) => [top(p.top, 20 + i * 20), bottom(p.bottom, 20 + i * 20, 80)]),
+  };
+}
+
+type GeoInstance = Pick<ComponentInstance, 'type' | 'custom'>;
+
+export function geometryOf(inst: GeoInstance): SymbolGeo {
+  return inst.type === 'custom' ? customGeometry(inst.custom) : GEOMETRY[inst.type];
+}
+
 const DIR_VEC: Record<Dir, Point> = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
 
 export function dirVector(d: Dir): Point {
@@ -99,9 +125,11 @@ function rotateDir(d: Dir, r: Rotation): Dir {
   return (Object.keys(DIR_VEC) as Dir[]).find((k) => DIR_VEC[k].x === v.x && DIR_VEC[k].y === v.y)!;
 }
 
+type Placed = Pick<ComponentInstance, 'type' | 'custom' | 'x' | 'y' | 'rotation'>;
+
 /** Yerel noktayı dünya koordinatına çevirir (bileşen merkezi etrafında döndürme). */
-export function toWorld(inst: Pick<ComponentInstance, 'type' | 'x' | 'y' | 'rotation'>, p: Point): Point {
-  const g = GEOMETRY[inst.type];
+export function toWorld(inst: Placed, p: Point): Point {
+  const g = geometryOf(inst);
   const c = { x: g.w / 2, y: g.h / 2 };
   const r = rotate({ x: p.x - c.x, y: p.y - c.y }, inst.rotation);
   return { x: inst.x + c.x + r.x + 0, y: inst.y + c.y + r.y + 0 };
@@ -112,10 +140,11 @@ export interface WorldTerminal extends TerminalGeo {
 }
 
 export function worldTerminals(inst: ComponentInstance): WorldTerminal[] {
-  return GEOMETRY[inst.type].terminals.map((t) => ({
+  return geometryOf(inst).terminals.map((t) => ({
     ...toWorld(inst, t),
     name: t.name,
     dir: rotateDir(t.dir, inst.rotation),
+    free: t.free,
     ref: { component: inst.id, terminal: t.name },
   }));
 }
@@ -132,8 +161,8 @@ export interface Rect {
 }
 
 /** Döndürülmüş bileşenin eksen hizalı sınır kutusu. */
-export function bounds(inst: Pick<ComponentInstance, 'type' | 'x' | 'y' | 'rotation'>): Rect {
-  const g = GEOMETRY[inst.type];
+export function bounds(inst: Placed): Rect {
+  const g = geometryOf(inst);
   const quarter = inst.rotation === 90 || inst.rotation === 270;
   const w = quarter ? g.h : g.w;
   const h = quarter ? g.w : g.h;
@@ -149,13 +178,19 @@ export function unionBounds(rects: Rect[]): Rect | null {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
+export const rectContains = (outer: Rect, inner: Rect) =>
+  inner.x >= outer.x && inner.y >= outer.y && inner.x + inner.w <= outer.x + outer.w && inner.y + inner.h <= outer.y + outer.h;
+
 /** Katalog ile geometri tutarlılığı: eksik/fazla terminal adlarını döndürür. */
 export function geometryMismatches(): string[] {
   const out: string[] = [];
-  for (const type of Object.keys(CATALOG) as ComponentType[]) {
+  for (const type of Object.keys(GEOMETRY) as BuiltinType[]) {
     const geo = GEOMETRY[type].terminals.map((t) => t.name).sort();
-    const cat = [...CATALOG[type].terminals].sort();
+    const cat = [...terminalsOf({ type })].sort();
     if (geo.join() !== cat.join()) out.push(`${type}: geometri [${geo.join()}] ≠ katalog [${cat.join()}]`);
+  }
+  for (const type of Object.keys(CATALOG) as ComponentType[]) {
+    if (type !== 'custom' && !(type in GEOMETRY)) out.push(`${type}: geometri yok`);
   }
   return out;
 }

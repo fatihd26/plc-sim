@@ -1,12 +1,12 @@
 // Proje dosyası: JSON içe/dışa aktarma ve tarayıcıda otomatik kayıt.
 
 import { startStopSchematic } from '../sim/examples';
-import { validateSchematic, type Schematic } from '../sim/schematic';
+import { migrateSchematic, validateSchematic, type Schematic } from '../sim/schematic';
 
 const STORAGE_KEY = 'plc-sim:schematic';
 export const FILE_EXTENSION = '.plcsim.json';
 
-/** JSON metnini şemaya çevirir; geçersizse açıklamalı hata fırlatır. */
+/** JSON metnini şemaya çevirir (eski sürümler güncellenir); geçersizse açıklamalı hata fırlatır. */
 export function parseSchematic(text: string): Schematic {
   let data: unknown;
   try {
@@ -14,7 +14,7 @@ export function parseSchematic(text: string): Schematic {
   } catch {
     throw new Error('Dosya geçerli JSON değil.');
   }
-  const s = data as Schematic;
+  const s = migrateSchematic(data);
   if (!s || typeof s !== 'object' || !Array.isArray(s.components) || !Array.isArray(s.wires)) {
     throw new Error('Dosya bir PLC-SIM şeması değil.');
   }
@@ -44,7 +44,11 @@ export function saveAutosave(s: Schematic): void {
   }
 }
 
-export function downloadSchematic(s: Schematic, name = 'proje'): void {
+/** Dosya adı için proje adını sadeleştirir. */
+const fileName = (title: string | undefined) =>
+  (title ?? '').trim().replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '-') || 'proje';
+
+export function downloadSchematic(s: Schematic, name = fileName(s.title)): void {
   const blob = new Blob([serializeSchematic(s)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');

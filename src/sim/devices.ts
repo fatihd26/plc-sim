@@ -102,6 +102,8 @@ export interface MotorParams {
   coastTauMs: number;
   /** Kilitli rotor akımı / nominal akım. */
   lockedRotorRatio: number;
+  /** Mil yükü, nominal yüke oranla [%]; kalıcı akımı belirler. */
+  loadPct: number;
 }
 
 /**
@@ -125,6 +127,7 @@ export class Motor {
       startTauMs: 400,
       coastTauMs: 1500,
       lockedRotorRatio: 6,
+      loadPct: 100,
     },
   ) {}
 
@@ -138,8 +141,10 @@ export class Motor {
     if (!powered && Math.abs(this.speed) < 1e-4) this.speed = 0;
 
     // Kayma: 0 (senkron) .. 1 (duruş) .. 2 (ters yönde dönerken frenleme); akım 1'de doyar.
+    // Kalıcı akım yükle orantılı (basitleştirme), duruşta kilitli rotor akımı.
     const slip = Math.min(1, Math.max(0, 1 - this.speed * direction));
-    this.currentA = powered ? p.ratedCurrentA * (1 + (p.lockedRotorRatio - 1) * slip) : 0;
+    const load = p.loadPct / 100;
+    this.currentA = powered ? p.ratedCurrentA * (load + (p.lockedRotorRatio - load) * slip) : 0;
 
     const degPerMs = (this.speed * p.ratedRpm * 360) / 60_000;
     this.angleDeg = (((this.angleDeg + degPerMs * dtMs) % 360) + 360) % 360;
