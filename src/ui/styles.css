@@ -74,7 +74,7 @@
 
 * { box-sizing: border-box; }
 html, body, #root { height: 100%; }
-body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; }
+body { margin: 0; background: var(--bg); color: var(--text); overflow: hidden; overscroll-behavior: none; }
 h3 { font-size: 14px; margin: 0 0 6px; }
 h4 { font-size: 12px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); margin: 14px 0 6px; }
 .mono { font-family: ui-monospace, Consolas, monospace; }
@@ -99,7 +99,14 @@ input:not([type]), input[type='search'], input[type='number'], select {
 }
 
 /* ===== Uygulama düzeni ================================================================= */
-.app { height: 100%; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; }
+/* dvh: mobilde adres çubuğu açılıp kapanınca yükseklik doğru kalır. Kenar boşlukları çentik ve
+   home çubuğu içindir (index.html'de viewport-fit=cover). */
+.app {
+  height: 100%; height: 100dvh; display: flex; flex-direction: column;
+  padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left);
+}
+.app > * { flex: none; }
+.app > .workspace { flex: 1; }
 
 .titlebar {
   display: flex; align-items: center; gap: 20px; padding: 6px 12px;
@@ -149,9 +156,6 @@ input:not([type]), input[type='search'], input[type='number'], select {
 
 .workspace { display: grid; grid-template-columns: 260px minmax(0, 1fr) 290px; min-height: 0; }
 @media (max-width: 1100px) { .workspace { grid-template-columns: 210px minmax(0, 1fr) 240px; } }
-@media (max-width: 760px) {
-  .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: 160px minmax(0, 1fr) 200px; }
-}
 .center { display: flex; flex-direction: column; min-width: 0; min-height: 0; position: relative; }
 
 /* ===== Paneller (dock) ================================================================= */
@@ -438,7 +442,7 @@ table.io { border-collapse: collapse; width: 100%; font-size: 12px; }
 .modal-backdrop { position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, .35); display: grid; place-items: center; padding: 16px; }
 .modal {
   background: var(--panel); color: var(--text); border: 1px solid var(--border); border-radius: 10px;
-  padding: 14px 16px; width: min(720px, 100%); max-height: calc(100vh - 32px); overflow: auto;
+  padding: 14px 16px; width: min(720px, 100%); max-height: calc(100vh - 32px); max-height: calc(100dvh - 32px); overflow: auto;
   box-shadow: 0 10px 40px rgba(0, 0, 0, .3); font-size: 13px;
 }
 .custom-editor { display: grid; grid-template-columns: minmax(0, 1fr) 200px; gap: 16px; }
@@ -478,16 +482,51 @@ ul.xref-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px;
 .network figcaption.pickable { cursor: pointer; border-radius: 4px; padding: 0 4px; }
 .network.selected figcaption { background: var(--accent-soft); outline: 1px solid var(--accent); }
 
-/* Dar ekran ve dokunmatik */
+/* Dar ekran: çizim alanı tam genişlikte. Kütüphane, Özellikler ve PLC paneli alttaki sekmelerden
+   açılan, çizim alanının üstüne binen çekmecelerdir (App.tsx: Sheet). Kırılım NARROW_QUERY ile aynı. */
+.sheet-tabs { display: flex; background: var(--panel); border-top: 1px solid var(--border); }
+.sheet-tabs button {
+  flex: 1; display: flex; flex-direction: column; align-items: center; gap: 1px; padding: 6px 4px;
+  border: none; border-radius: 0; background: none; color: var(--muted);
+}
+.sheet-tabs button.active { color: var(--accent); background: var(--accent-soft); }
+.sheet-tabs .count { margin-left: 4px; }
+
 @media (max-width: 760px) {
-  .bottom-dock { height: 220px; }
+  .workspace { display: flex; position: relative; }
+  .center { flex: 1; }
+  .workspace > .dock, .bottom-dock {
+    position: absolute; left: 0; right: 0; bottom: 0; z-index: 5; height: min(60%, 460px);
+    border: none; border-top: 1px solid var(--border); border-radius: 12px 12px 0 0;
+    box-shadow: 0 -6px 24px rgba(0, 0, 0, .18); overflow: hidden;
+  }
+  .workspace > .dock { display: none; }
+  .app[data-sheet='library'] .library, .app[data-sheet='properties'] .properties { display: flex; }
+  .dock-title { border-radius: 12px 12px 0 0; }
   .bottom-body, .ladder-edit-body { grid-template-columns: minmax(0, 1fr); }
   .io-pane, .ladder-inspector { border-left: none; border-top: 1px solid var(--border); }
-  .clock { display: none; }
+
+  .titlebar { gap: 10px; padding: 6px 10px; }
+  .version, .clock, .ribbon-label { display: none; }
+  .ribbon { padding: 2px 4px; }
+  .ribbon-group { padding: 0 4px; }
   .tool { min-width: 44px; }
+  .statusbar .cell.opt { display: none; }
+  .statusbar .cell.fault, .statusbar .cell.warn, .statusbar .cell.message { flex: 1; min-width: 0; }
+  .banner { max-width: calc(100% - 24px); }
 }
+
+/* Dokunmatik: parmakla rahat basılan hedefler. iOS, 16px altı yazı boyutlu alana odaklanınca
+   sayfayı yakınlaştırır; bileşen sınıflarındaki küçük boyutları ezmek için !important. */
 @media (pointer: coarse) {
   .tool { min-width: 48px; min-height: 44px; }
   .page-tab > button:first-child, .page-add { padding: 8px 12px; }
   .library li { padding: 10px 6px; }
+  button { min-height: 36px; }
+  button.icon { min-width: 36px; }
+  .mode-tabs button { padding: 6px 14px; }
+  .ladder-toolbar button { padding: 6px 10px; }
+  .menu button { padding: 10px 12px; }
+  input, select, textarea { font-size: 16px !important; }
+  * { -webkit-tap-highlight-color: transparent; }
 }

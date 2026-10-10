@@ -59,8 +59,11 @@
   Çift tıklayınca karşı sayfaya gidilir.
 - [~] **Dar ekran desteği zayıf.** Dokunmatikte tek parmak kaydırır, iki parmak yakınlaştırır.
   Terminal yakalama yarıçapı büyür. Kütüphaneden sürükle-bırak yerine "tıkla, sonra alana tıkla"
-  ile yerleştirme yapılabilir. Dar ekranda alt panel tek sütuna iner. **Gerçek bir dokunmatik
-  cihazda henüz test edilmedi.**
+  ile yerleştirme yapılabilir. Dar ekranda (≤ 760 px) çizim alanı tam ekrandır. Kütüphane,
+  Özellikler ve PLC paneli alttaki sekmelerden açılan çekmecelerdir. Kütüphaneden eleman seçilince
+  çekmece kapanır. Dokunmatikte hedefler büyür, iOS'un form alanında otomatik yakınlaştırması
+  engellenir, çentik/home çubuğu boşlukları bırakılır. **Gerçek bir dokunmatik cihazda henüz test
+  edilmedi** (yalnız Chrome mobil emülasyonu).
 
 ## Kalan sınırlar (v0.3)
 
@@ -79,3 +82,4 @@
   kablolar basit güzergâhla önizlenir.
 - [ ] **Sayfalar arası taşıma yok.** Bir eleman kesip başka sayfaya yapıştırılarak taşınabilir.
   Bu durumda dış kabloları kaybolur.
+  

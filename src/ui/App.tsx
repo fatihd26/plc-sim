@@ -32,6 +32,24 @@ import { useSimulation } from './useSimulation';
 
 type Mode = 'edit' | 'sim';
 
+/** Dar ekranda paneller çizim alanının üstüne açılan alt çekmecelerdir; aynı anda biri açıktır. */
+type Sheet = 'library' | 'properties' | 'plc';
+
+/** styles.css'teki dar ekran kırılımıyla aynı olmalı. */
+const NARROW_QUERY = '(max-width: 760px)';
+
+function useMediaQuery(query: string) {
+  const [match, setMatch] = useState(() => window.matchMedia(query).matches);
+  useEffect(() => {
+    const mq = window.matchMedia(query);
+    const on = () => setMatch(mq.matches);
+    on();
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, [query]);
+  return match;
+}
+
 const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
 
@@ -47,6 +65,8 @@ export function App() {
   const [view, setView] = useState<ViewInfo>({ cursor: null, zoom: 1 });
   const [fitSignal, setFitSignal] = useState(0);
   const [bottomOpen, setBottomOpen] = useState(true);
+  const narrow = useMediaQuery(NARROW_QUERY);
+  const [sheet, setSheet] = useState<Sheet | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [pageState, setPage] = useState<string>(() => pagesOf(schematic)[0]!.id);
   const [plcChoice, setPlcChoice] = useState<string | null>(null);
@@ -63,8 +83,21 @@ export function App() {
 
   const fit = useCallback(() => setFitSignal((n) => n + 1), []);
 
-  // Alt panel açılıp kapanınca çizim alanı boyutu değişir: şemayı yeniden sığdır.
-  useEffect(fit, [bottomOpen, mode, fit]);
+  // Dar ekranda PLC paneli de bir çekmecedir. Masaüstünde ayrı açılıp kapanır.
+  const plcOpen = narrow ? sheet === 'plc' : bottomOpen;
+  const setPlcOpen = useCallback(
+    (open: boolean) => {
+      if (narrow) setSheet((s) => (open ? 'plc' : s === 'plc' ? null : s));
+      else setBottomOpen(open);
+    },
+    [narrow],
+  );
+  const toggleSheet = (s: Sheet) => setSheet((cur) => (cur === s ? null : s));
+
+  // Yerleşik alt panel açılıp kapanınca çizim alanı boyutu değişir: şemayı yeniden sığdır.
+  // Çekmeceler çizim alanının üstüne açıldığı için boyutu değiştirmez.
+  const dockedBottom = !narrow && bottomOpen;
+  useEffect(fit, [dockedBottom, narrow, mode, fit]);
   const loadNew = useCallback(
     (next: Schematic, note: string) => {
       setMode('edit');
@@ -241,7 +274,7 @@ export function App() {
   const hasSelection = !isEmpty(selection);
 
   return (
-    <div className={`app mode-${mode}`}>
+    <div className={`app mode-${mode}`} data-sheet={narrow && sheet ? sheet : undefined}>
       <header className="titlebar">
         <div className="brand">
           <span className="logo" aria-hidden>
@@ -309,7 +342,7 @@ export function App() {
         <Group label="Görünüm">
           <Tool icon="⤢" label="Sığdır" title="F" onClick={fit} />
           <Tool icon="＋" label="Yeni sayfa" disabled={!edit} onClick={addPage} />
-          <Tool icon="▤" label="PLC paneli" active={bottomOpen} onClick={() => setBottomOpen((o) => !o)} />
+          <Tool icon="▤" label="PLC paneli" active={plcOpen} onClick={() => setPlcOpen(!plcOpen)} />
         </Group>
         <Group label="Simülasyon">
           {running ? (
@@ -330,7 +363,11 @@ export function App() {
           dispatch={dispatch}
           onDrag={setDrag}
           placing={edit ? placing : null}
-          onPlace={setPlacing}
+          onPlace={(item) => {
+            setPlacing(item);
+            // Dar ekranda seçilen eleman çizim alanına tıklanarak yerleştirilir: çekmece kapanır.
+            if (item && narrow) setSheet(null);
+          }}
         />
 
         <main className="center">
@@ -366,7 +403,7 @@ export function App() {
               <strong>Simülasyon kurulamadı:</strong> {sim.error}
             </div>
           )}
-          {bottomOpen && (
+          {plcOpen && (
             <section className="bottom-dock">
               <header className="dock-title">
                 {edit ? 'PLC programı' : 'PLC: online izleme ve I/O'}
@@ -384,7 +421,7 @@ export function App() {
                     ))}
                   </select>
                 )}
-                <button type="button" className="icon" aria-label="Paneli kapat" onClick={() => setBottomOpen(false)}>
+                <button type="button" className="icon" aria-label="Paneli kapat" onClick={() => setPlcOpen(false)}>
                   ✕
                 </button>
               </header>
@@ -425,21 +462,21 @@ export function App() {
           onJump={jump}
           onEditProgram={(id) => {
             setPlcChoice(id);
-            setBottomOpen(true);
+            setPlcOpen(true);
           }}
           onCopy={copy}
         />
       </div>
 
       <footer className="statusbar mono">
-        <span className="cell coords">
+        <span className="cell coords opt">
           {view.cursor ? `X ${Math.round(view.cursor.x)}  Y ${Math.round(view.cursor.y)}` : 'X —  Y —'}
         </span>
-        <span className="cell">Zoom {Math.round(view.zoom * 100)}%</span>
-        <span className="cell on">IZGARA {GRID}</span>
-        <span className="cell on">YAKALA</span>
-        <span className="cell on">ORTO</span>
-        <span className="cell">
+        <span className="cell opt">Zoom {Math.round(view.zoom * 100)}%</span>
+        <span className="cell on opt">IZGARA {GRID}</span>
+        <span className="cell on opt">YAKALA</span>
+        <span className="cell on opt">ORTO</span>
+        <span className="cell opt">
           {schematic.components.filter((c) => c.type !== 'junction').length} eleman · {schematic.wires.length} kablo
           {hasSelection && ` · ${selection.components.length + selection.wires.length} seçili`}
         </span>
@@ -461,7 +498,35 @@ export function App() {
           )
         )}
       </footer>
+
+      {narrow && (
+        <nav className="sheet-tabs" aria-label="Paneller">
+          <SheetTab icon="▦" label="Kütüphane" active={sheet === 'library'} onClick={() => toggleSheet('library')} />
+          <SheetTab
+            icon="☰"
+            label="Özellikler"
+            badge={hasSelection ? selection.components.length + selection.wires.length : undefined}
+            active={sheet === 'properties'}
+            onClick={() => toggleSheet('properties')}
+          />
+          <SheetTab icon="▤" label="PLC" active={sheet === 'plc'} onClick={() => toggleSheet('plc')} />
+        </nav>
+      )}
     </div>
+  );
+}
+
+function SheetTab(props: { icon: string; label: string; badge?: number; active: boolean; onClick(): void }) {
+  return (
+    <button type="button" className={props.active ? 'active' : ''} aria-pressed={props.active} onClick={props.onClick}>
+      <span className="tool-icon" aria-hidden>
+        {props.icon}
+      </span>
+      <span className="tool-label">
+        {props.label}
+        {props.badge ? <span className="count">{props.badge}</span> : null}
+      </span>
+    </button>
   );
 }
 
@@ -546,7 +611,9 @@ function ExamplesMenu({ disabled, onPick }: { disabled: boolean; onPick(e: Examp
         active={!!at}
         onClick={() => {
           const r = ref.current!.getBoundingClientRect();
-          setAt(at ? null : { x: r.left, y: r.bottom + 4 });
+          // Menü genişliği min(360px, 100vw - 32px): dar ekranda sağdan taşmasın
+          const w = Math.min(360, window.innerWidth - 32);
+          setAt(at ? null : { x: Math.max(16, Math.min(r.left, window.innerWidth - w - 16)), y: r.bottom + 4 });
         }}
       />
       {at && (
