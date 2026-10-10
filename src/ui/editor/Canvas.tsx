@@ -1,6 +1,6 @@
 // CAD tarzı çizim alanı: ızgara, imleç merkezli zoom, kaydırma, yakalama (snap), sayfa çerçevesi,
 // kütüphaneden sürükle-bırak, kutu ile çoklu seçim, grup taşıma, terminalden terminale veya kablonun
-// ortasına kablo çizimi, kablo parçası sürükleme ve simülasyonda etkileşim. Dokunmatikte tek parmak
+// ortasına kablo çizimi (Simulink tarzı: boşluğa her tıklama bir köşe noktası bırakır), kablo parçası sürükleme ve simülasyonda etkileşim. Dokunmatikte tek parmak
 // kaydırır, iki parmak yakınlaştırır.
 
 import {
@@ -30,7 +30,7 @@ import {
   type WorldTerminal,
 } from './geometry';
 import { boxSelect, pageContent, routePage, SHEET, xrefTargets, type BoxSelect } from './layout';
-import { dragSegment, manualRoute, nearestOnPath, route, stubPoint, toPath, type Endpoint } from './routing';
+import { dragSegment, manualRoute, nearestOnPath, orthoJoin, route, stubPoint, toPath, type Endpoint } from './routing';
 import { SymbolBody } from './symbols';
 
 export const DRAG_MIME = 'application/x-plcsim-component';
@@ -77,7 +77,8 @@ type Gesture =
   | { kind: 'pinch'; dist: number; mid: Point; cam: { x: number; y: number; zoom: number } }
   | { kind: 'move'; ids: string[]; start: Point; dx: number; dy: number }
   | { kind: 'box'; box: BoxSelect; additive: boolean }
-  | { kind: 'wire'; from: WorldTerminal; sticky: boolean; startX: number; startY: number }
+  /** points: boşluğa tıklanarak bırakılan ara noktalar; kablo son noktadan devam eder. */
+  | { kind: 'wire'; from: WorldTerminal; points: Point[]; sticky: boolean; startX: number; startY: number }
   | { kind: 'segment'; wire: string; full: Point[]; segment: number; a: Endpoint; b: Endpoint; points: Point[] | null }
   | { kind: 'press'; id: string };
 
@@ -219,13 +220,23 @@ export function Canvas(props: Props) {
   const { onView } = props;
   useEffect(() => onView({ cursor, zoom: cam.zoom }), [cursor, cam.zoom, onView]);
 
-  // Esc: yarım kalan işlemi iptal et
+  // Esc: yarım kalan işlemi iptal et. Kablo çizerken Backspace son köşe noktasını geri alır
+  // (yakalama aşamasında dinlenir; seçimi silme kısayoluna ulaşmaz).
+  const gestureRef = useRef(gesture);
+  gestureRef.current = gesture;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      const g = gestureRef.current;
       if (e.key === 'Escape') setGesture({ kind: 'none' });
+      else if ((e.key === 'Backspace' || e.key === 'Delete') && g.kind === 'wire') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (g.points.length) setGesture({ ...g, points: g.points.slice(0, -1) });
+        else setGesture({ kind: 'none' });
+      }
     };
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
   }, []);
 
   // Mod veya sayfa değişince yarım kalan işlemi bırak
@@ -266,19 +277,28 @@ export function Canvas(props: Props) {
     [content.wires, paths],
   );
 
-  /** Kablo ucunu bırakma: terminale bağlan, yoksa kablonun ortasına (bağlantı noktası). */
-  const finishWire = (from: WorldTerminal, p: Point): boolean => {
-    const term = nearestTerminal(p, from.ref);
+  /**
+   * Kablo ucunu bırakma: terminale bağlan, yoksa kablonun ortasına (bağlantı noktası). Boşlukta
+   * kablo kaybolmaz: tıklanan yer köşe noktası olur ve çizim oradan devam eder.
+   */
+  const extendWire = (g: Extract<Gesture, { kind: 'wire' }>, p: Point) => {
+    const points = g.points.length ? g.points : undefined;
+    const term = nearestTerminal(p, g.from.ref);
     if (term) {
-      dispatch({ type: 'connect', a: from.ref, b: term.ref });
-      return true;
+      dispatch({ type: 'connect', a: g.from.ref, b: term.ref, points });
+      setGesture({ kind: 'none' });
+      return;
     }
-    const hit = wireAt(p, from.ref);
+    const hit = wireAt(p, g.from.ref);
     if (hit) {
-      dispatch({ type: 'connectToWire', from: from.ref, wire: hit.id, x: hit.point.x, y: hit.point.y });
-      return true;
+      dispatch({ type: 'connectToWire', from: g.from.ref, wire: hit.id, x: hit.point.x, y: hit.point.y, points });
+      setGesture({ kind: 'none' });
+      return;
     }
-    return false;
+    const q = { x: snap(p.x), y: snap(p.y) };
+    const last = g.points[g.points.length - 1] ?? stubPoint(g.from);
+    const same = last.x === q.x && last.y === q.y;
+    setGesture({ ...g, sticky: true, points: same ? g.points : [...g.points, q] });
   };
 
   // --- İşaretçi olayları ----------------------------------------------------------------
@@ -347,13 +367,12 @@ export function Canvas(props: Props) {
       return;
     }
     if (gesture.kind === 'wire' && gesture.sticky) {
-      finishWire(gesture.from, p);
-      setGesture({ kind: 'none' });
+      extendWire(gesture, p);
       return;
     }
     const term = nearestTerminal(p);
     if (term) {
-      setGesture({ kind: 'wire', from: term, sticky: false, startX: e.clientX, startY: e.clientY });
+      setGesture({ kind: 'wire', from: term, points: [], sticky: false, startX: e.clientX, startY: e.clientY });
       return;
     }
     // Seçili kablonun parça tutamağı
@@ -472,11 +491,10 @@ export function Canvas(props: Props) {
         if (gesture.sticky) break;
         const clicked = Math.hypot(e.clientX - gesture.startX, e.clientY - gesture.startY) < 4;
         if (clicked) {
-          // Tıkla-tıkla modu: ikinci tıklama hedef terminali (veya kabloyu) seçer
+          // Tıkla-tıkla modu: sonraki tıklamalar köşe noktası bırakır veya hedefi seçer
           setGesture({ ...gesture, sticky: true });
         } else {
-          finishWire(gesture.from, p);
-          setGesture({ kind: 'none' });
+          extendWire(gesture, p);
         }
         break;
       }
@@ -606,7 +624,9 @@ export function Canvas(props: Props) {
   if (gesture.kind === 'wire' && cursor) {
     const target = nearestTerminal(cursor, gesture.from.ref);
     const end = target ?? wireTarget?.point ?? { x: snap(cursor.x), y: snap(cursor.y) };
-    rubber = route(gesture.from, target ?? { ...end, free: true });
+    if (gesture.points.length === 0) rubber = route(gesture.from, target ?? { ...end, free: true });
+    else if (target) rubber = manualRoute(gesture.from, target, gesture.points);
+    else rubber = orthoJoin([gesture.from, stubPoint(gesture.from), ...gesture.points, end]);
   }
 
   const box = gesture.kind === 'box' ? gesture.box : null;
@@ -719,6 +739,14 @@ export function Canvas(props: Props) {
         })}
 
         {rubber && <path d={toPath(rubber)} className="rubber" />}
+        {gesture.kind === 'wire' && gesture.points.length > 0 && (
+          <g className="wire-draft">
+            <path d={toPath(orthoJoin([gesture.from, stubPoint(gesture.from), ...gesture.points]))} />
+            {gesture.points.map((q, i) => (
+              <rect key={i} x={q.x - 2.5} y={q.y - 2.5} width={5} height={5} />
+            ))}
+          </g>
+        )}
         {wireTarget && <circle cx={wireTarget.point.x} cy={wireTarget.point.y} r={5} className="osnap" />}
 
         {box && (
@@ -770,7 +798,7 @@ export function Canvas(props: Props) {
       {mode === 'edit' && gesture.kind === 'wire' && (
         <div className="canvas-prompt">
           Kablo: <strong>{byId.get(gesture.from.ref.component)?.name}:{gesture.from.name}</strong> → hedef terminali
-          veya dallanılacak kabloyu seçin (Esc iptal)
+          veya dallanılacak kabloyu seçin; boşluğa tıklama köşe bırakır (Backspace geri al, Esc iptal)
         </div>
       )}
       {mode === 'edit' && content.components.length === 0 && (

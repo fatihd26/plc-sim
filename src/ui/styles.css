@@ -242,6 +242,9 @@ table.terms { border-collapse: collapse; width: 100%; font-size: 12px; }
 .canvas .crosshair { stroke: var(--accent); stroke-width: 1; opacity: .35; vector-effect: non-scaling-stroke; pointer-events: none; }
 .canvas .osnap { fill: none; stroke: var(--osnap); stroke-width: 1.5; vector-effect: non-scaling-stroke; pointer-events: none; }
 .canvas .rubber { fill: none; stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 5 3; pointer-events: none; }
+.canvas .wire-draft { pointer-events: none; }
+.canvas .wire-draft path { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+.canvas .wire-draft rect { fill: var(--accent); }
 .canvas .ghost { opacity: .45; pointer-events: none; }
 .canvas .tag { font: 600 11px system-ui, sans-serif; fill: var(--text); pointer-events: none; }
 .canvas .term-label { font: 7px ui-monospace, Consolas, monospace; fill: var(--muted); pointer-events: none; }

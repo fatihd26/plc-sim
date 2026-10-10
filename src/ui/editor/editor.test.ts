@@ -112,6 +112,19 @@ describe('editör dokümanı', () => {
     expect(validateSchematic(s.schematic)).toEqual([]);
   });
 
+  it('kablo: çizerken bırakılan köşe noktaları kaydedilir', () => {
+    let s = run(empty, add('buttonNO', 0, 0), add('buttonNC', 200, 200));
+    const [a, b] = s.schematic.components;
+    const ta = { component: a!.id, terminal: '14' };
+    const tb = { component: b!.id, terminal: '11' };
+    const points = [{ x: 100, y: 60 }, { x: 150, y: 60 }];
+    s = run(s, { type: 'connect', a: ta, b: tb, points });
+    expect(s.schematic.wires[0]!.points).toEqual(points);
+    s = run(s, { type: 'connect', a: tb, b: { component: a!.id, terminal: '13' }, points: [] });
+    expect(s.schematic.wires[1]!.points).toBeUndefined();
+    expect(validateSchematic(s.schematic)).toEqual([]);
+  });
+
   it('bileşen silinince bağlı kabloları da silinir', () => {
     let s = initEditor(startStopSchematic());
     const before = s.schematic.wires.length;

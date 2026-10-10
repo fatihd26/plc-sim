@@ -52,9 +52,10 @@ export type EditorAction =
   | { type: 'rename'; id: string; name: string }
   | { type: 'setParam'; id: string; key: string; value: ParamValue }
   | { type: 'setProgram'; id: string; program: LadderProgram }
-  | { type: 'connect'; a: TerminalRef; b: TerminalRef }
+  /** points: kablo çizilirken tıklanan ara noktalar (elle güzergâh). */
+  | { type: 'connect'; a: TerminalRef; b: TerminalRef; points?: Point[] }
   /** Kablonun ortasına bağlanma: (x, y)'de bağlantı noktası oluşturur, kabloyu böler. */
-  | { type: 'connectToWire'; from: TerminalRef; wire: string; x: number; y: number }
+  | { type: 'connectToWire'; from: TerminalRef; wire: string; x: number; y: number; points?: Point[] }
   | { type: 'setWirePoints'; id: string; points: Point[] | undefined }
   | { type: 'deleteSelection' }
   | { type: 'select'; selection: Selection }
@@ -212,7 +213,8 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       );
       if (exists) return state;
       const id = nextId('w', s.wires.map((w) => w.id));
-      return commit(state, { ...s, wires: [...s.wires, { id, a, b }] }, selectWire(id));
+      const wire = action.points?.length ? { id, a, b, points: action.points } : { id, a, b };
+      return commit(state, { ...s, wires: [...s.wires, wire] }, selectWire(id));
     }
     case 'connectToWire': {
       const w = s.wires.find((w) => w.id === action.wire);
@@ -236,7 +238,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
             ...s.wires.filter((x) => x.id !== w.id),
             { id: w1, a: w.a, b: jt },
             { id: w2, a: jt, b: w.b },
-            { id: w3, a: action.from, b: jt },
+            action.points?.length ? { id: w3, a: action.from, b: jt, points: action.points } : { id: w3, a: action.from, b: jt },
           ],
         },
         selectWire(w3),
