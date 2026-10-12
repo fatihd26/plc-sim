@@ -49,7 +49,7 @@ npm run build      # tip kontrolü + üretim derlemesi
 |---|---|
 | Kaynaklar | Şebeke 3~/N 400/230 V (X), güç kaynağı 24 V DC – kısa devrede akım sınırlaması (G) |
 | Komuta | Buton NO / NC (S), acil stop – kilitlemeli (S) |
-| Şalt | Kontaktör, bobin 24 V DC / 230 V AC (K) |
+| Şalt | Kontaktör, bobin 24 V DC / 230 V AC (K); ara röle 13-14/23-24 NO, 31-32 NC (K) |
 | Koruma | Motor koruma şalteri – termik + manyetik açma (Q), otomatik sigorta 1P (F), termik röle (F) |
 | Tüketiciler | Asenkron motor 3~, yük oranı ayarlı (M) |
 | Sinyal | Sinyal lambası 24 V DC / 230 V AC (P) |
@@ -61,6 +61,11 @@ PLC komutları şemaya değil PLC programına eklendiği için sol kütüphanede
 ladder editörünün solundaki **PLC komutları** menüsündedir: kontak NO/NC/P/N, karşılaştırma,
 bobin/ters bobin/set/reset, TON/TOF/TP/TONR (T0..T15), CTU/CTD/CTUD (C0..C15). Komut ladder
 üzerine sürüklenir (elemana: sağına seri, Shift ile paralel; boş alana: yeni network) veya tıklanır.
+
+**PLC çıkışı yük beslemez.** %Q çıkışları yalnız bobin (röle, kontaktör) sürer. Lamba, fan,
+valf gibi bir yük PLC çıkış netine bağlanırsa simülasyonda çalışmaz ve "PLC çıkışından doğrudan
+beslenemez, araya röle koyun" arızası verir. Tek fazlı (230 V) ve 24 V yükler ara röle kontağı
+üzerinden beslenir; örneklerin tamamı bu düzendedir.
 
 Parametreler `sim/catalog.ts` içinde tip başına tanımlıdır ve Özellikler panelinde düzenlenir.
 

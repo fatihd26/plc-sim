@@ -9,6 +9,7 @@ export type ComponentType =
   | 'buttonNC'
   | 'estop'
   | 'contactor'
+  | 'relay'
   | 'breaker3'
   | 'fuse'
   | 'thermal'
@@ -174,6 +175,20 @@ export const CATALOG: Record<ComponentType, ComponentSpec> = {
       voltageParam('coilVoltage', 'Bobin gerilimi'),
       num('pickupMs', 'Çekme süresi', 20, 1, 500, 1, 'ms'),
       num('dropoutMs', 'Bırakma süresi', 15, 1, 500, 1, 'ms'),
+    ],
+  },
+  relay: {
+    type: 'relay',
+    title: 'Röle (ara röle)',
+    prefix: 'K',
+    category: 'Şalt',
+    description:
+      'PLC çıkışı ile yük arasında: bobin A1-A2, 13-14 ve 23-24 NO, 31-32 NC. Tek fazlı (230 V) ve 24 V yükler bu röle üzerinden beslenir',
+    terminals: ['13', '14', '23', '24', '31', '32', 'A1', 'A2'],
+    params: [
+      voltageParam('coilVoltage', 'Bobin gerilimi'),
+      num('pickupMs', 'Çekme süresi', 10, 1, 500, 1, 'ms'),
+      num('dropoutMs', 'Bırakma süresi', 8, 1, 500, 1, 'ms'),
     ],
   },
   breaker3: {

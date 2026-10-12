@@ -60,6 +60,14 @@ export const GEOMETRY: Record<BuiltinType, SymbolGeo> = {
       ]),
     ],
   },
+  relay: {
+    w: 100,
+    h: 80,
+    terminals: [['13', '14'], ['23', '24'], ['31', '32'], ['A1', 'A2']].flatMap(([t, b], i) => [
+      top(t!, 20 + i * 20),
+      bottom(b!, 20 + i * 20, 80),
+    ]),
+  },
   thermal: {
     w: 120,
     h: 80,

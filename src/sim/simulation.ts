@@ -57,7 +57,7 @@ export type ComponentState =
   | { type: 'mains3' | 'terminal' | 'junction' | 'xref' }
   | { type: 'psu24'; limited: boolean }
   | { type: 'buttonNO' | 'buttonNC' | 'estop'; pressed: boolean; contactClosed: boolean }
-  | { type: 'contactor'; coilEnergized: boolean; closed: boolean; fault: string | null }
+  | { type: 'contactor' | 'relay'; coilEnergized: boolean; closed: boolean; fault: string | null }
   | {
       type: 'breaker3';
       closed: boolean;
@@ -164,7 +164,7 @@ type Device =
   | { type: 'mains3' | 'terminal' | 'junction' | 'xref' }
   | { type: 'psu24'; limited: boolean }
   | { type: 'buttonNO' | 'buttonNC' | 'estop'; button: PushButton }
-  | { type: 'contactor'; contactor: Contactor; voltage: Voltage; fault: string | null }
+  | { type: 'contactor' | 'relay'; contactor: Contactor; voltage: Voltage; fault: string | null }
   | { type: 'breaker3'; closed: boolean; tripped: boolean; relay: ThermalRelay; currentA: number }
   | { type: 'fuse'; closed: boolean; tripped: boolean }
   | { type: 'lamp'; lit: boolean; voltage: Voltage; fault: string | null }
@@ -194,6 +194,9 @@ interface Entry {
 
 const PHASES: Potential[] = ['L1', 'L2', 'L3'];
 const isPhase = (p: NetPotential) => p === 'L1' || p === 'L2' || p === 'L3';
+
+/** Yük doğrudan PLC çıkışına bağlandığında verilen arıza. */
+export const PLC_DIRECT_FAULT = 'PLC çıkışından doğrudan beslenemez, araya röle koyun';
 
 /** İki uç arasındaki beslemenin türü (mantıksal; akım hesaplanmaz). */
 export function supplyBetween(a: NetPotential, b: NetPotential): Supply {
@@ -243,6 +246,7 @@ function createDevice(c: ComponentInstance, config: SimConfig): Device {
     case 'estop':
       return { type: c.type, button: new PushButton('NC') };
     case 'contactor':
+    case 'relay':
       return {
         type: c.type,
         contactor: new Contactor({ pickupMs: numParam(c, 'pickupMs'), dropoutMs: numParam(c, 'dropoutMs') }),
@@ -422,11 +426,22 @@ export class Simulation {
     // 3. PLC çıkışları değişmiş olabilir: bobinler ve motorlar güncel netleri görsün
     nets = this.protect(this.solveNets());
     const supply = (e: Entry, a: string, b: string) => supplyBetween(nets.potential(e.t[a]!), nets.potential(e.t[b]!));
+    // PLC çıkışı yalnız bobin (röle, kontaktör) sürer. Ucu bir PLC çıkış netinde olan yük
+    // (lamba, fan, valf...) hiçbir koşulda çalışmaz ve arıza verir: araya röle konmalıdır.
+    const plcNets = new Set<number>();
+    for (const e of this.entries) {
+      if (e.device.type === 'plc') for (const n of PLC_DQ) plcNets.add(nets.netOf(e.t[n]!));
+    }
+    const load = (e: Entry, rating: Voltage, a: string, b: string, was: string | null) => {
+      if (!plcNets.has(nets.netOf(e.t[a]!)) && !plcNets.has(nets.netOf(e.t[b]!))) return loadResponse(rating, supply(e, a, b));
+      if (was !== PLC_DIRECT_FAULT) this.event(e, `${a}-${b}: ${PLC_DIRECT_FAULT}`);
+      return { on: false, fault: PLC_DIRECT_FAULT };
+    };
 
     // 4. Bobinler (anma geriliminde çeker; DC iki yönde de)
     for (const e of this.entries) {
       const d = e.device;
-      if (d.type === 'contactor') {
+      if (d.type === 'contactor' || d.type === 'relay') {
         const r = loadResponse(d.voltage, supply(e, 'A1', 'A2'));
         d.fault = r.fault;
         d.contactor.update(r.on, TICK_MS);
@@ -435,7 +450,10 @@ export class Simulation {
         let fault: string | null = null;
         d.def.poles.forEach((p, i) => {
           if (p.kind !== 'coil' && p.kind !== 'lamp') return;
-          const r = loadResponse(d.def.voltage, supply(e, p.top, p.bottom));
+          const r =
+            p.kind === 'lamp'
+              ? load(e, d.def.voltage, p.top, p.bottom, d.fault)
+              : loadResponse(d.def.voltage, supply(e, p.top, p.bottom));
           d.poles[i] = r.on;
           fault ??= r.fault;
           if (p.kind === 'coil' && r.on) energized = true;
@@ -443,7 +461,7 @@ export class Simulation {
         d.fault = fault;
         d.relay.update(energized, TICK_MS);
       } else if (d.type === 'cylinder') {
-        const r = loadResponse(d.voltage, supply(e, 'A1', 'A2'));
+        const r = load(e, d.voltage, 'A1', 'A2', d.fault);
         d.fault = r.fault;
         d.cylinder.update(r.on, TICK_MS);
       }
@@ -472,7 +490,7 @@ export class Simulation {
     for (const e of this.entries) {
       const d = e.device;
       if (d.type !== 'fan') continue;
-      const r = loadResponse(d.voltage, supply(e, 'X1', 'X2'));
+      const r = load(e, d.voltage, 'X1', 'X2', d.fault);
       d.fault = r.fault;
       d.motor.update(r.on, TICK_MS, 1);
     }
@@ -502,7 +520,7 @@ export class Simulation {
     for (const e of this.entries) {
       const d = e.device;
       if (d.type !== 'lamp') continue;
-      const r = loadResponse(d.voltage, supply(e, 'X1', 'X2'));
+      const r = load(e, d.voltage, 'X1', 'X2', d.fault);
       d.lit = r.on;
       d.fault = r.fault;
     }
@@ -652,6 +670,14 @@ export class Simulation {
             link('21', '22');
           }
           break;
+        case 'relay':
+          if (d.contactor.closed) {
+            link('13', '14');
+            link('23', '24');
+          } else {
+            link('31', '32');
+          }
+          break;
         case 'thermal':
           link('1', '2');
           link('3', '4');
@@ -754,6 +780,7 @@ export class Simulation {
       case 'lamp':
         return { type: d.type, lit: d.lit, fault: d.fault };
       case 'contactor':
+      case 'relay':
         return { type: d.type, coilEnergized: d.contactor.coilEnergized, closed: d.contactor.closed, fault: d.fault };
       case 'thermal':
         return {

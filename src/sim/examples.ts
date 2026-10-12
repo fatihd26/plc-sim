@@ -130,6 +130,30 @@ function motorPower(load: ComponentInstance): Part {
   };
 }
 
+/**
+ * PLC çıkışı yükü doğrudan beslemez: çıkış `relay` rölesinin bobinini (A1-A2) sürer, rölenin
+ * 13-14 NO kontağı `supply` beslemesini yüke verir. Varsayılan besleme G1 24 V DC.
+ */
+function relayLoad(
+  relay: string,
+  x: number,
+  y: number,
+  output: string,
+  load: [string, string],
+  supply: [string, string] = ['G1:L+', 'G1:M'],
+): Part {
+  return {
+    components: [{ id: relay, type: 'relay', name: relay, x, y, rotation: 0 }],
+    wires: [
+      w(`A1:${output}`, `${relay}:A1`),
+      w(`${relay}:A2`, 'G1:M'),
+      w(supply[0], `${relay}:13`),
+      w(`${relay}:14`, load[0]),
+      w(load[1], supply[1]),
+    ],
+  };
+}
+
 const merge = (...parts: Part[]): Part => ({
   components: parts.flatMap((p) => p.components),
   wires: parts.flatMap((p) => p.wires),
@@ -152,12 +176,19 @@ export function fanSchematic(): Schematic {
   };
   return {
     version: 2,
-    title: 'Fan: PLC çıkışından start-stop',
+    title: 'Fan: PLC + röle ile start-stop',
     pages: [{ id: 'p1', title: 'Kumanda' }],
-    ...merge(controlPanel(40, program), {
-      components: [{ id: 'E1', type: 'fan', name: 'E1', x: 120, y: 460, rotation: 0, params: { voltage: '24DC' } }],
-      wires: [w('A1:Q0.0', 'E1:X1'), w('E1:X2', 'G1:M')],
-    }),
+    ...merge(
+      controlPanel(40, program),
+      relayLoad('K1', 60, 440, 'Q0.0', ['E1:X1', 'E1:X2'], ['X1:L1', 'X1:N']),
+      {
+        components: [
+          { id: 'X1', type: 'mains3', name: 'X1', x: 320, y: 20, rotation: 0 },
+          { id: 'E1', type: 'fan', name: 'E1', x: 60, y: 580, rotation: 0, params: { voltage: '230AC' } },
+        ],
+        wires: [],
+      },
+    ),
   };
 }
 
@@ -182,13 +213,11 @@ export function pistonSchematic(): Schematic {
     version: 2,
     title: 'Pnömatik piston: tek çevrim',
     pages: [{ id: 'p1', title: 'Kumanda' }],
-    ...merge(controlPanel(40, program), {
+    ...merge(controlPanel(40, program), relayLoad('K1', 60, 440, 'Q0.0', ['Y1:A1', 'Y1:A2']), {
       components: [
-        { id: 'Y1', type: 'cylinder', name: 'Y1', x: 60, y: 460, rotation: 0, params: { extendMs: 1500, retractMs: 1000 } },
+        { id: 'Y1', type: 'cylinder', name: 'Y1', x: 60, y: 580, rotation: 0, params: { extendMs: 1500, retractMs: 1000 } },
       ],
       wires: [
-        w('A1:Q0.0', 'Y1:A1'),
-        w('Y1:A2', 'G1:M'),
         w('G1:L+', 'Y1:23'),
         w('Y1:24', 'A1:I0.2'),
         w('G1:L+', 'Y1:13'),
@@ -233,9 +262,9 @@ export function conveyorSchematic(): Schematic {
     version: 2,
     title: 'Konveyör: kutu fotosele gelince dur',
     pages: [{ id: 'p1', title: 'Güç ve kumanda devresi' }],
-    ...merge(controlPanel(360, program), motorPower(conveyor), {
-      components: [{ id: 'P1', type: 'lamp', name: 'P1', x: 460, y: 460, rotation: 0, params: { color: 'yellow' } }],
-      wires: [w('G1:L+', 'M1:13'), w('M1:14', 'A1:I0.3'), w('A1:Q0.1', 'P1:X1'), w('P1:X2', 'G1:M')],
+    ...merge(controlPanel(360, program), motorPower(conveyor), relayLoad('K2', 440, 440, 'Q0.1', ['P1:X1', 'P1:X2']), {
+      components: [{ id: 'P1', type: 'lamp', name: 'P1', x: 460, y: 580, rotation: 0, params: { color: 'yellow' } }],
+      wires: [w('G1:L+', 'M1:13'), w('M1:14', 'A1:I0.3')],
     }),
   };
 }
@@ -277,16 +306,9 @@ export function tankSchematic(): Schematic {
     version: 2,
     title: 'Depo seviye kontrolü',
     pages: [{ id: 'p1', title: 'Güç ve kumanda devresi' }],
-    ...merge(controlPanel(360, program), motorPower(pump), {
-      components: [{ id: 'P1', type: 'lamp', name: 'P1', x: 460, y: 460, rotation: 0, params: { color: 'yellow' } }],
-      wires: [
-        w('G1:L+', 'M1:13'),
-        w('M1:14', 'A1:I0.3'),
-        w('G1:L+', 'M1:23'),
-        w('M1:24', 'A1:I0.4'),
-        w('A1:Q0.1', 'P1:X1'),
-        w('P1:X2', 'G1:M'),
-      ],
+    ...merge(controlPanel(360, program), motorPower(pump), relayLoad('K2', 440, 440, 'Q0.1', ['P1:X1', 'P1:X2']), {
+      components: [{ id: 'P1', type: 'lamp', name: 'P1', x: 460, y: 580, rotation: 0, params: { color: 'yellow' } }],
+      wires: [w('G1:L+', 'M1:13'), w('M1:14', 'A1:I0.3'), w('G1:L+', 'M1:23'), w('M1:24', 'A1:I0.4')],
     }),
   };
 }
@@ -352,13 +374,18 @@ export function timerCounterSchematic(): Schematic {
     version: 2,
     title: 'Zamanlayıcı ve sayıcı',
     pages: [{ id: 'p1', title: 'Kumanda' }],
-    ...merge(controlPanel(40, program), {
-      components: [
-        { id: 'P1', type: 'lamp', name: 'P1', x: 120, y: 460, rotation: 0, params: { voltage: '24DC', color: 'green' } },
-        { id: 'P2', type: 'lamp', name: 'P2', x: 200, y: 460, rotation: 0, params: { voltage: '24DC', color: 'yellow' } },
-      ],
-      wires: [w('A1:Q0.0', 'P1:X1'), w('P1:X2', 'G1:M'), w('A1:Q0.1', 'P2:X1'), w('P2:X2', 'G1:M')],
-    }),
+    ...merge(
+      controlPanel(40, program),
+      relayLoad('K1', 60, 440, 'Q0.0', ['P1:X1', 'P1:X2']),
+      relayLoad('K2', 200, 440, 'Q0.1', ['P2:X1', 'P2:X2']),
+      {
+        components: [
+          { id: 'P1', type: 'lamp', name: 'P1', x: 60, y: 580, rotation: 0, params: { voltage: '24DC', color: 'green' } },
+          { id: 'P2', type: 'lamp', name: 'P2', x: 200, y: 580, rotation: 0, params: { voltage: '24DC', color: 'yellow' } },
+        ],
+        wires: [],
+      },
+    ),
   };
 }
 
@@ -375,13 +402,14 @@ export const EXAMPLES: Example[] = [
   {
     id: 'fan',
     title: 'Fan: start-stop',
-    description: 'PLC çıkışı 24 V DC fanı doğrudan sürer; mühürleme mantığı. Alıştırma: ikinci bir fan ekleyin.',
+    description:
+      'PLC çıkışı K1 rölesini sürer, röle kontağı 230 V fanı besler (yük PLC çıkışına doğrudan bağlanmaz). Alıştırma: ikinci bir fan ve rölesini ekleyin.',
     build: fanSchematic,
   },
   {
     id: 'start-stop',
     title: 'Motor: start-stop',
-    description: 'Kontaktör ve termik röleyle 3~ motor. Alıştırma: "motor çalışıyor" lambası ekleyin.',
+    description: 'Kontaktör ve termik röleyle 3~ motor. Alıştırma: "motor çalışıyor" lambası ekleyin (PLC çıkışı → röle → lamba).',
     build: startStopSchematic,
   },
   {
@@ -395,14 +423,14 @@ export const EXAMPLES: Example[] = [
     id: 'conveyor',
     title: 'Konveyör: fotoselde dur',
     description:
-      'Kutu fotosele gelince bant durur, start kutuyu gönderir. Alıştırma: bant çalışırken yanan yeşil bir "Bant çalışıyor" lambası (Q0.2) ekleyin.',
+      'Kutu fotosele gelince bant durur, start kutuyu gönderir. Alıştırma: bant çalışırken yanan yeşil bir "Bant çalışıyor" lambası (Q0.2) ekleyin; lambayı bir röle üzerinden besleyin.',
     build: conveyorSchematic,
   },
   {
     id: 'tank',
     title: 'Depo seviye kontrolü',
     description:
-      'Otomatik modda alt seviyede pompa başlar, üst seviyede durur. Alıştırma: alt sensör kuruyken alarm lambası yakın.',
+      'Otomatik modda alt seviyede pompa başlar, üst seviyede durur. Alıştırma: alt sensör kuruyken alarm lambası yakın (röle üzerinden).',
     build: tankSchematic,
   },
   {

@@ -217,6 +217,27 @@ export function SymbolBody({ inst, state, xrefText }: BodyProps): ReactNode {
         </g>
       );
     }
+    case 'relay': {
+      const s = st(state, 'relay');
+      const closed = s?.closed ?? false;
+      return (
+        <g>
+          <rect x={2} y={6} width={g.w - 4} height={g.h - 12} rx={3} className="frame" />
+          <Pole x={20} yFixed={26} yPivot={54} h={80} closed={closed} />
+          <Pole x={40} yFixed={26} yPivot={54} h={80} closed={closed} />
+          <Pole x={60} yFixed={26} yPivot={54} h={80} closed={!closed} nc />
+          <line x1={12} y1={40} x2={64} y2={40} strokeDasharray="4 3" className="thin" />
+          <line x1={80} y1={0} x2={80} y2={28} />
+          <rect x={71} y={28} width={18} height={24} className={s?.coilEnergized ? 'coil on' : s?.fault ? 'coil fault' : 'coil'} />
+          <line x1={80} y1={52} x2={80} y2={80} />
+          {strParam(inst, 'coilVoltage') === '230AC' && (
+            <text x={80} y={44} className="sym-text tiny">
+              ~
+            </text>
+          )}
+        </g>
+      );
+    }
     case 'thermal': {
       const s = st(state, 'thermal');
       const tripped = s?.tripped ?? false;

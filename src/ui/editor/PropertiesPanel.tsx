@@ -433,6 +433,7 @@ function LiveState({
         </Live>
       );
     case 'contactor':
+    case 'relay':
       return (
         <Live>
           <p>

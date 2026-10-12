@@ -127,6 +127,7 @@ describe('simülasyonda mekanik elemanlar', () => {
         comp('S1', 'buttonNO'),
         comp('A1', 'plc', { program: cycleProgram }),
         comp('Y1', 'cylinder', { params: { extendMs: 300, retractMs: 300 } }),
+        comp('K1', 'relay'),
       ],
       [
         wire('G1:L+', 'A1:L+'),
@@ -135,7 +136,11 @@ describe('simülasyonda mekanik elemanlar', () => {
         wire('S1:14', 'A1:I0.0'),
         wire('G1:L+', 'Y1:23'),
         wire('Y1:24', 'A1:I0.1'),
-        wire('A1:Q0.0', 'Y1:A1'),
+        // PLC çıkışı yalnız röle bobinini sürer; valfi rölenin kontağı besler.
+        wire('A1:Q0.0', 'K1:A1'),
+        wire('K1:A2', 'G1:M'),
+        wire('G1:L+', 'K1:13'),
+        wire('K1:14', 'Y1:A1'),
         wire('Y1:A2', 'G1:M'),
       ],
     );
@@ -344,5 +349,66 @@ describe('örnek şemalar', () => {
     expect(until(sim, 30_000, (x) => state(x, 'M1', 'pump').powered)).toBe(true);
     s = sim.snapshot();
     expect(s.events.some((e) => e.text.includes('taştı'))).toBe(false);
+  });
+});
+
+describe('PLC çıkışı yükü doğrudan besleyemez', () => {
+  const always: LadderProgram = {
+    networks: [
+      {
+        id: 'N1',
+        title: 'Q0.0 hep 1',
+        logic: { kind: 'contact', id: 'a', address: '%I0.0', contact: 'NC' },
+        coil: { id: 'c', address: '%Q0.0' },
+      },
+    ],
+  };
+  const base = [comp('G1', 'psu24'), comp('A1', 'plc', { program: always })];
+  const supply = [wire('G1:L+', 'A1:L+'), wire('G1:M', 'A1:M')];
+
+  it.each([
+    ['lamp', 'P1', 'X1', 'X2'],
+    ['fan', 'E1', 'X1', 'X2'],
+    ['cylinder', 'Y1', 'A1', 'A2'],
+  ] as const)('%s doğrudan PLC çıkışında çalışmaz ve arıza verir', (type, id, a, b) => {
+    const sim = new Simulation(
+      sch([...base, comp(id, type)], [...supply, wire('A1:Q0.0', `${id}:${a}`), wire(`${id}:${b}`, 'G1:M')]),
+    );
+    sim.run(100);
+    const s = sim.snapshot();
+    expect((s.components[id] as { fault: string | null }).fault).toMatch(/röle/);
+    if (type === 'lamp') expect(state(s, id, 'lamp').lit).toBe(false);
+    if (type === 'fan') expect(state(s, id, 'fan').powered).toBe(false);
+    if (type === 'cylinder') expect(state(s, id, 'cylinder').valve).toBe(false);
+    expect(s.events.some((e) => /röle/.test(e.text))).toBe(true);
+  });
+
+  it('röle üzerinden beslenen yük çalışır', () => {
+    const sim = new Simulation(
+      sch(
+        [...base, comp('K1', 'relay'), comp('P1', 'lamp')],
+        [
+          ...supply,
+          wire('A1:Q0.0', 'K1:A1'),
+          wire('K1:A2', 'G1:M'),
+          wire('G1:L+', 'K1:13'),
+          wire('K1:14', 'P1:X1'),
+          wire('P1:X2', 'G1:M'),
+        ],
+      ),
+    );
+    sim.run(100);
+    const s = sim.snapshot();
+    expect(state(s, 'K1', 'relay').closed).toBe(true);
+    expect(state(s, 'P1', 'lamp')).toMatchObject({ lit: true, fault: null });
+  });
+
+  it('örneklerde hiçbir yük PLC çıkışına doğrudan bağlı değil', () => {
+    for (const ex of EXAMPLES) {
+      const sim = new Simulation(ex.build());
+      sim.run(200);
+      const faults = Object.values(sim.snapshot().components).filter((c) => 'fault' in c && /röle/.test(String(c.fault)));
+      expect(faults, ex.id).toEqual([]);
+    }
   });
 });
