@@ -145,7 +145,7 @@ export function PropertiesPanel(props: Props) {
           ))}
         </dl>
         {c.type === 'xref' && <XrefInfo schematic={schematic} c={c} pages={pages} onJump={props.onJump} />}
-        {c.type === 'plc' && (
+        {(c.type === 'plc' || c.type === 'esp32') && (
           <div className="btn-row">
             <button type="button" className="primary" onClick={() => props.onEditProgram(c.id)}>
               {edit ? 'Programı düzenle' : 'Programı izle'}
@@ -547,6 +547,64 @@ function LiveState({
           <p>
             <Lamp on={state.powered} /> {state.powered ? 'RUN' : 'Besleme yok'} · scan #{state.scanCount}
           </p>
+        </Live>
+      );
+    case 'esp32':
+      return (
+        <Live>
+          <p>
+            <Lamp on={state.powered} /> {state.powered ? `Çalışıyor · döngü #${state.loopCount}` : 'Besleme yok (24V-GND)'}
+          </p>
+          <table className="terms">
+            <tbody>
+              {state.pins.map((p) => (
+                <tr key={p.pin}>
+                  <td className="mono">{p.pin}</td>
+                  <td className="mono">{p.mode === 'in' ? `%I0.${p.bit}` : `%Q0.${p.bit}`}</td>
+                  <td>
+                    <Lamp on={p.on} />
+                  </td>
+                  <td>
+                    {p.mode === 'out' && state.firmware === 'modbusSlave' && (
+                      <button
+                        type="button"
+                        className="small"
+                        disabled={!state.powered}
+                        title="Test master: coil'e FC5 ile yaz"
+                        onClick={() =>
+                          send({ type: 'modbusWrite', component: id, request: { fn: 5, addr: p.bit, value: !state.coils[p.bit] } })
+                        }
+                      >
+                        coil {p.bit} = {state.coils[p.bit] ? 0 : 1}
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <label>
+            ADC1: {(state.adcMv / 1000).toFixed(2)} V · ham {state.adcRaw}
+            <input
+              type="range"
+              min={0}
+              max={10_000}
+              step={100}
+              value={state.adcMv}
+              onChange={(e) => send({ type: 'analog', component: id, mv: Number(e.target.value) })}
+            />
+          </label>
+          <p className="mono small">
+            Modbus adres {state.slaveId} · IR0 {state.inputRegisters[0]} · IR1 {state.inputRegisters[1]} mV · HR0..3{' '}
+            {state.holdingRegisters.join(' ')}
+          </p>
+          <p className="small">
+            <Lamp on={state.busPeers.length > 0} fault={!!state.rs485Fault} /> RS485:{' '}
+            {state.rs485Fault ?? (state.busPeers.length ? `bus'ta ${state.busPeers.join(', ')}` : 'bağlı cihaz yok')}
+          </p>
+          {state.firmware === 'local' && (
+            <p className="muted small">Yerel firmware: giriş pinleri sırayla çıkış pinlerine aktarılır.</p>
+          )}
         </Live>
       );
     case 'custom': {

@@ -9,6 +9,7 @@
 
 import {
   FUNC_COUNT,
+  MW_COUNT,
   formatOperand,
   isFunc,
   parseAddress,
@@ -110,6 +111,8 @@ export interface Runtime {
   counters: CounterState[];
   /** Kenar kontaklarının önceki bit değeri (eleman kimliğine göre). */
   edges: Record<string, boolean>;
+  /** %MW kelime belleği (Modbus holding register'ları). */
+  words: Uint16Array;
 }
 
 export function createRuntime(): Runtime {
@@ -124,6 +127,7 @@ export function createRuntime(): Runtime {
       prevDown: false,
     })),
     edges: {},
+    words: new Uint16Array(MW_COUNT),
   };
 }
 
@@ -282,6 +286,7 @@ function readOperand(ctx: Ctx, op: BitOperand): boolean {
 
 function readValue(ctx: Ctx, op: ValueOperand): number {
   if (op.area === 'K') return op.value;
+  if (op.area === 'MW') return ctx.rt.words[op.index]!;
   return op.area === 'T' ? ctx.rt.timers[op.index]!.et : ctx.rt.counters[op.index]!.cv;
 }
 

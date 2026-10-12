@@ -1,5 +1,6 @@
 // Editör dokümanı: şema + seçim + geri al/yinele geçmişi. Saf reducer, React'tan bağımsız.
 
+import { isController } from '../../sim/ioConfig';
 import { CATALOG, prefixOf, terminalsOf, type ComponentType, type CustomDef, type ParamValue } from '../../sim/catalog';
 import type { LadderProgram } from '../../sim/ladder';
 import {
@@ -51,6 +52,8 @@ export type EditorAction =
   | { type: 'rotate'; ids: string[] }
   | { type: 'rename'; id: string; name: string }
   | { type: 'setParam'; id: string; key: string; value: ParamValue }
+  /** Birden çok parametre tek geri alma adımında (ör. G/Ç otomatik yapılandırma). */
+  | { type: 'setParams'; id: string; params: Record<string, ParamValue> }
   | { type: 'setProgram'; id: string; program: LadderProgram }
   /** points: kablo çizilirken tıklanan ara noktalar (elle güzergâh). */
   | { type: 'connect'; a: TerminalRef; b: TerminalRef; points?: Point[] }
@@ -147,7 +150,7 @@ function newComponent(
   const id = nextId('c', s.components.map((c) => c.id));
   const c: ComponentInstance = { id, type, name: '', x, y, rotation: 0, page };
   if (custom) c.custom = structuredClone(custom);
-  if (type === 'plc') c.program = { networks: [] };
+  if (type === 'plc' || type === 'esp32') c.program = { networks: [] };
   c.name = nextName(s, c);
   return c;
 }
@@ -200,9 +203,19 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         updateComponent(s, action.id, (c) => ({ ...c, params: { ...c.params, [action.key]: action.value } })),
       );
     }
+    case 'setParams': {
+      const c = s.components.find((c) => c.id === action.id);
+      if (!c) return state;
+      const known = Object.entries(action.params).filter(([k]) => CATALOG[c.type].params.some((p) => p.key === k));
+      if (known.every(([k, v]) => c.params?.[k] === v)) return state;
+      return commit(
+        state,
+        updateComponent(s, action.id, (c) => ({ ...c, params: { ...c.params, ...Object.fromEntries(known) } })),
+      );
+    }
     case 'setProgram': {
       const c = s.components.find((c) => c.id === action.id);
-      if (!c || c.type !== 'plc' || c.program === action.program) return state;
+      if (!c || !isController(c.type) || c.program === action.program) return state;
       return commit(state, updateComponent(s, action.id, (c) => ({ ...c, program: action.program })));
     }
     case 'connect': {

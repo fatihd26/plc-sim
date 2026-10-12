@@ -53,7 +53,7 @@ npm run build      # tip kontrolü + üretim derlemesi
 | Koruma | Motor koruma şalteri – termik + manyetik açma (Q), otomatik sigorta 1P (F), termik röle (F) |
 | Tüketiciler | Asenkron motor 3~, yük oranı ayarlı (M) |
 | Sinyal | Sinyal lambası 24 V DC / 230 V AC (P) |
-| Kontrol | PLC 8 DI / 8 DQ, kendi ladder programıyla (A) |
+| Kontrol | PLC 8 DI / 8 DQ, kendi ladder programıyla (A); ESP32 I/O kartı: 4 GPIO (24 V, giriş/çıkış seçilir), ADC1 0–10 V, RS485 Modbus slave; ladder ile programlanır (A) |
 | Bağlantı | Klemens (X), bağlantı noktası (J), sayfa geçişi (XR) |
 | Kullanıcı | Kutup türlerinden tanımlanan bileşenler (proje dosyasında saklanır) |
 
@@ -62,8 +62,21 @@ ladder editörünün solundaki **PLC komutları** menüsündedir: kontak NO/NC/P
 bobin/ters bobin/set/reset, TON/TOF/TP/TONR (T0..T15), CTU/CTD/CTUD (C0..C15). Komut ladder
 üzerine sürüklenir (elemana: sağına seri, Shift ile paralel; boş alana: yeni network) veya tıklanır.
 
+**ESP32 ladder ile programlanır.** Firmware "Ladder programı" (varsayılan) iken kart PLC gibi
+çalışır ve programı alt paneldeki kontrolör seçicisinden düzenlenir. Hangi GPIO pininin hangi
+adres olduğu **G/Ç eşlemesi** ile belirlenir (ladder araç çubuğu "⚙ G/Ç eşlemesi" veya ESP32
+parametreleri): her pinin yönü (giriş/çıkış) ve adresi (`Otomatik` ya da `%I0.0..0.7` /
+`%Q0.0..0.7`). Otomatik pinler boştaki ilk adresi alır (varsayılan: GPIO16 = `%I0.0`,
+GPIO17 = `%I0.1`, GPIO18 = `%Q0.0`, GPIO19 = `%Q0.1`). "Programdan otomatik" düğmesi pinleri
+programın kullandığı adreslere göre ayarlar ve mevcut eşlemeyi korur; yönü çevrilen pini bildirir.
+Aynı adres iki pine verilirse şema hatası olur. Ladder'da adres yazarken öneri listesi çıkar ve
+adresin hangi pine gittiği (ya da hiçbir pine bağlı olmadığı) gösterilir. ADC1 her döngüde
+`%MW0`'a (ham, 0..4095 = 0..10 V) ve `%MW1`'e (mV) yazılır. Modbus slave görünümü: coil ↔ `%Q`,
+discrete input ↔ `%I`, holding register ↔ `%MW`, IR0/IR1 = ADC. Scan periyodu "Firmware döngüsü"
+ayarıdır.
+
 **PLC çıkışı yük beslemez.** %Q çıkışları yalnız bobin (röle, kontaktör) sürer. Lamba, fan,
-valf gibi bir yük PLC çıkış netine bağlanırsa simülasyonda çalışmaz ve "PLC çıkışından doğrudan
+valf gibi bir yük PLC veya ESP32 çıkış netine bağlanırsa simülasyonda çalışmaz ve "PLC çıkışından doğrudan
 beslenemez, araya röle koyun" arızası verir. Tek fazlı (230 V) ve 24 V yükler ara röle kontağı
 üzerinden beslenir; örneklerin tamamı bu düzendedir.
 
@@ -78,12 +91,14 @@ kütüphanedeki "Yeni bileşen tanımla" kullanılır.
 
 ```
 src/sim/   Simülasyon çekirdeği (saf TS; React/DOM/Math.random/Date.now yasak — purity.test.ts denetler)
-  address.ts      %I/%Q/%M bit adresleme
+  address.ts      %I/%Q/%M bit, T/C ve %MW kelime adresleme
   ladder.ts       Ladder modeli (seri/paralel ağaç), derleme, güç akışı, zamanlayıcı/sayıcı yürütme
   instructions.ts Ladder komut kütüphanesi (palet ve sol kütüphane)
   ladderEdit.ts   Ladder üzerinde saf düzenleme işlemleri (seri/paralel ekle, sil, normalize)
   symbolTable.ts  PLC adresi → kablolamadan bulunan şema elemanı
-  plc.ts          Terminaller, process image (PII/PIQ/M), scan()
+  plc.ts          Terminaller, process image (PII/PIQ/M), scan(); Modbus slave görünümü
+  esp32.ts        ESP32 I/O kartı: firmware (ladder / Modbus slave / yerel), GPIO, ADC, RS485 bus bulma
+  modbus.ts       Modbus veri modeli, istek işleyici (FC1-6, 15, 16), RTU çerçeve/CRC, sanal RS485 bus
   devices.ts      PushButton, Contactor, ThermalRelay, Motor
   catalog.ts      Bileşen kütüphanesi: tip, kategori, terminaller, parametreler, kullanıcı tanımları
   schematic.ts    Şema dokümanı (sayfalar, bileşenler, kablolar, kütüphane), doğrulama, sürüm taşıma

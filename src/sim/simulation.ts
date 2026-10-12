@@ -11,9 +11,12 @@ import {
   type CustomDef,
   type Voltage,
 } from './catalog';
+import { Esp32, ESP32_GPIO, rs485Groups, type Esp32Firmware, type Esp32Pin, type PinMode } from './esp32';
+import { handleRequest, type ModbusRequest } from './modbus';
 import { Contactor, Conveyor, Cylinder, Motor, PushButton, Tank, ThermalRelay } from './devices';
 import type { LadderProgram, LadderTrace } from './ladder';
 import { NetSolver, type NetPotential, type NetResult, type Potential } from './netlist';
+import { controllerIo } from './ioConfig';
 import { Plc } from './plc';
 import { startStopProgram } from './programs';
 import { terminalKey, validateSchematic, type ComponentInstance, type Schematic } from './schematic';
@@ -29,7 +32,11 @@ export type SimCommand =
   | { type: 'thermalTest'; component: string }
   | { type: 'thermalReset'; component: string }
   /** Konveyörün başına kutu koy. */
-  | { type: 'addBox'; component: string };
+  | { type: 'addBox'; component: string }
+  /** ESP32 ADC1 girişine verilen gerilim [mV]. */
+  | { type: 'analog'; component: string; mv: number }
+  /** Test master'ı: ESP32'nin Modbus belleğine doğrudan istek (bus'sız, anında). */
+  | { type: 'modbusWrite'; component: string; request: ModbusRequest };
 
 export interface LoggedCommand {
   tick: number;
@@ -80,21 +87,28 @@ export type ComponentState =
       angleDeg: number;
       direction: 1 | -1;
     }
+  | ({ type: 'plc' } & PlcRuntimeState)
   | {
-      type: 'plc';
+      type: 'esp32';
       powered: boolean;
-      scanTimeMs: number;
-      scanCount: number;
-      /** DI terminalleri (fiziksel) ve PII. */
-      diTerminals: boolean[];
-      pii: boolean[];
-      /** PIQ ve DQ terminalleri (fiziksel). */
-      piq: boolean[];
-      dqTerminals: boolean[];
-      trace: LadderTrace;
-      /** Zamanlayıcılar (geçen süre ms) ve sayıcılar (değer), T0.. / C0.. sırasıyla. */
-      timers: { et: number; q: boolean }[];
-      counters: { cv: number; q: boolean }[];
+      firmware: Esp32Firmware;
+      slaveId: number;
+      loopCount: number;
+      /** Pin başına yön ve durum (giriş: 24 V var mı, çıkış: sürülüyor mu). */
+      pins: { pin: Esp32Pin; bit: number; mode: PinMode; on: boolean }[];
+      adcMv: number;
+      adcRaw: number;
+      /** Modbus belleğinin ilk öğeleri (izleme için). */
+      coils: boolean[];
+      discreteInputs: boolean[];
+      inputRegisters: number[];
+      holdingRegisters: number[];
+      /** Aynı RS485 bus'taki diğer cihazların adları. */
+      busPeers: string[];
+      /** RS485 kablolama hatası (A/B ters, köprü). */
+      rs485Fault: string | null;
+      /** Ladder firmware'inde programın çalışma durumu; diğer firmware'lerde null. */
+      ladder: PlcRuntimeState | null;
     }
   | {
       type: 'cylinder';
@@ -148,6 +162,41 @@ export type ComponentState =
     };
 
 /** UI'ya verilen, salt-okunur ve kopyalanmış durum. */
+/** Ladder çalıştıran bir kontrolörün (PLC, ESP32) izleme verisi. */
+export interface PlcRuntimeState {
+  powered: boolean;
+  scanTimeMs: number;
+  scanCount: number;
+  /** DI terminalleri (fiziksel) ve PII; process image bit sırasıyla. */
+  diTerminals: boolean[];
+  pii: boolean[];
+  /** PIQ ve DQ terminalleri (fiziksel). */
+  piq: boolean[];
+  dqTerminals: boolean[];
+  trace: LadderTrace;
+  /** Zamanlayıcılar (geçen süre ms) ve sayıcılar (değer), T0.. / C0.. sırasıyla. */
+  timers: { et: number; q: boolean }[];
+  counters: { cv: number; q: boolean }[];
+  /** %MW0.. kelime belleği. */
+  words: number[];
+}
+
+function plcRuntimeState(p: Plc, powered: boolean, scanTimeMs: number, n: number): PlcRuntimeState {
+  return {
+    powered,
+    scanTimeMs,
+    scanCount: p.scanCount,
+    diTerminals: p.diTerminals.slice(0, n),
+    pii: p.imageCopy('I').slice(0, n),
+    piq: p.imageCopy('Q').slice(0, n),
+    dqTerminals: p.dqTerminals.slice(0, n),
+    trace: structuredClone(p.lastTrace),
+    timers: p.timers(),
+    counters: p.counters(),
+    words: p.wordsCopy(),
+  };
+}
+
 export interface SimSnapshot {
   tick: number;
   timeMs: number;
@@ -171,6 +220,7 @@ type Device =
   | { type: 'thermal'; relay: ThermalRelay; currentA: number }
   | { type: 'motor3'; motor: Motor }
   | { type: 'plc'; plc: Plc; powered: boolean; scanTimeMs: number }
+  | { type: 'esp32'; esp: Esp32; adcMv: number }
   | { type: 'cylinder'; cylinder: Cylinder; voltage: Voltage; fault: string | null }
   | { type: 'conveyor'; motor: Motor; conveyor: Conveyor }
   | { type: 'fan'; motor: Motor; voltage: Voltage; fault: string | null }
@@ -196,7 +246,7 @@ const PHASES: Potential[] = ['L1', 'L2', 'L3'];
 const isPhase = (p: NetPotential) => p === 'L1' || p === 'L2' || p === 'L3';
 
 /** Yük doğrudan PLC çıkışına bağlandığında verilen arıza. */
-export const PLC_DIRECT_FAULT = 'PLC çıkışından doğrudan beslenemez, araya röle koyun';
+export const PLC_DIRECT_FAULT = 'PLC/ESP32 çıkışından doğrudan beslenemez, araya röle koyun';
 
 /** İki uç arasındaki beslemenin türü (mantıksal; akım hesaplanmaz). */
 export function supplyBetween(a: NetPotential, b: NetPotential): Supply {
@@ -291,6 +341,32 @@ function createDevice(c: ComponentInstance, config: SimConfig): Device {
         powered: false,
         scanTimeMs: config.scanTimeMs ?? Math.round(numParam(c, 'scanTimeMs')),
       };
+    case 'esp32': {
+      const modes = Object.fromEntries(ESP32_GPIO.map((p) => [p, strParam(c, `mode_${p}`) as PinMode])) as Record<
+        Esp32Pin,
+        PinMode
+      >;
+      const io = controllerIo(c);
+      const bits = Object.fromEntries([...io.inputs, ...io.outputs].map((p) => [p.terminal, p.bit])) as Record<
+        Esp32Pin,
+        number
+      >;
+      return {
+        type: c.type,
+        esp: new Esp32(
+          {
+            bits,
+            slaveId: numParam(c, 'slaveId'),
+            baud: Number(strParam(c, 'baud')),
+            loopMs: Math.max(1, Math.round(numParam(c, 'loopMs'))),
+            modes,
+            firmware: strParam(c, 'firmware') as Esp32Firmware,
+          },
+          c.program,
+        ),
+        adcMv: 0,
+      };
+    }
     case 'cylinder':
       return {
         type: c.type,
@@ -422,6 +498,15 @@ export class Simulation {
       PLC_DI.forEach((name, i) => (d.plc.diTerminals[i] = nets.potential(e.t[name]!) === 'P24'));
       if (this.tick % (d.scanTimeMs / TICK_MS) === 0) d.plc.scan(d.scanTimeMs);
     }
+    for (const e of this.entries) {
+      const d = e.device;
+      if (d.type !== 'esp32') continue;
+      const powered = nets.potential(e.t['24V']!) === 'P24' && nets.potential(e.t['GND']!) === 'M0';
+      const pins = Object.fromEntries(
+        ESP32_GPIO.map((p) => [p, d.esp.params.modes[p] === 'in' && nets.potential(e.t[p]!) === 'P24']),
+      ) as Record<Esp32Pin, boolean>;
+      d.esp.update({ powered, pins, adcMv: d.adcMv }, TICK_MS);
+    }
 
     // 3. PLC çıkışları değişmiş olabilir: bobinler ve motorlar güncel netleri görsün
     nets = this.protect(this.solveNets());
@@ -431,6 +516,10 @@ export class Simulation {
     const plcNets = new Set<number>();
     for (const e of this.entries) {
       if (e.device.type === 'plc') for (const n of PLC_DQ) plcNets.add(nets.netOf(e.t[n]!));
+      if (e.device.type === 'esp32') {
+        const modes = e.device.esp.params.modes;
+        for (const p of ESP32_GPIO) if (modes[p] === 'out') plcNets.add(nets.netOf(e.t[p]!));
+      }
     }
     const load = (e: Entry, rating: Voltage, a: string, b: string, was: string | null) => {
       if (!plcNets.has(nets.netOf(e.t[a]!)) && !plcNets.has(nets.netOf(e.t[b]!))) return loadResponse(rating, supply(e, a, b));
@@ -685,6 +774,9 @@ export class Simulation {
           if (d.relay.tripped) link('97', '98');
           else link('95', '96');
           break;
+        case 'esp32':
+          for (const p of ESP32_GPIO) if (d.esp.outputs[p]) s.addSource(t[p]!, 'P24');
+          break;
         case 'plc':
           if (d.powered) {
             PLC_DQ.forEach((name, i) => {
@@ -749,6 +841,18 @@ export class Simulation {
       case 'addBox':
         if (d.type === 'conveyor' && !d.conveyor.addBox()) this.event(e, 'bandın başında yer yok');
         break;
+      case 'analog':
+        if (d.type === 'esp32') d.adcMv = Math.max(0, Math.min(10_000, Math.round(command.mv)));
+        break;
+      case 'modbusWrite':
+        if (d.type === 'esp32') {
+          if (!d.esp.inputs.powered) this.event(e, 'Modbus: kart enerjisiz, yanıt yok');
+          else {
+            const r = handleRequest(d.esp.regs, command.request);
+            if (!r.ok) this.event(e, `Modbus istisna ${r.exception} (FC${r.fn})`);
+          }
+        }
+        break;
     }
   }
 
@@ -804,22 +908,33 @@ export class Simulation {
           direction: m.direction,
         };
       }
-      case 'plc': {
-        const p = d.plc;
+      case 'esp32': {
+        const x = d.esp;
         return {
           type: d.type,
-          powered: d.powered,
-          scanTimeMs: d.scanTimeMs,
-          scanCount: p.scanCount,
-          diTerminals: p.diTerminals.slice(0, PLC_DI.length),
-          pii: p.imageCopy('I').slice(0, PLC_DI.length),
-          piq: p.imageCopy('Q').slice(0, PLC_DQ.length),
-          dqTerminals: p.dqTerminals.slice(0, PLC_DQ.length),
-          trace: structuredClone(p.lastTrace),
-          timers: p.timers(),
-          counters: p.counters(),
+          powered: x.inputs.powered,
+          firmware: x.params.firmware,
+          slaveId: x.params.slaveId,
+          loopCount: x.loopCount,
+          pins: ESP32_GPIO.map((pin) => ({
+            pin,
+            bit: x.params.bits[pin],
+            mode: x.params.modes[pin],
+            on: x.params.modes[pin] === 'in' ? x.inputs.pins[pin] : x.outputs[pin],
+          })),
+          adcMv: d.adcMv,
+          adcRaw: x.adcRaw,
+          coils: x.regs.coils.slice(0, 8),
+          discreteInputs: x.regs.discreteInputs.slice(0, 8),
+          inputRegisters: [...x.regs.inputRegisters.subarray(0, 2)],
+          holdingRegisters: [...x.regs.holdingRegisters.subarray(0, 4)],
+          busPeers: [],
+          rs485Fault: null,
+          ladder: x.plc ? plcRuntimeState(x.plc, x.inputs.powered, x.params.loopMs, 8) : null,
         };
       }
+      case 'plc':
+        return { type: d.type, ...plcRuntimeState(d.plc, d.powered, d.scanTimeMs, Math.max(PLC_DI.length, PLC_DQ.length)) };
       case 'cylinder': {
         const c = d.cylinder;
         return {
@@ -883,12 +998,29 @@ export class Simulation {
     }
   }
 
+  /** RS485 kablolamasından bus üyeliklerini ve kablolama hatalarını ESP32 durumlarına yazar. */
+  private annotateRs485(nets: NetResult, components: Record<string, ComponentState>): void {
+    const nodes = this.entries
+      .filter((e) => e.device.type === 'esp32')
+      .map((e) => ({ id: e.id, name: e.name, a: nets.netOf(e.t['RS485_A']!), b: nets.netOf(e.t['RS485_B']!) }));
+    const { groups, swapped } = rs485Groups(nodes);
+    for (const n of nodes) {
+      const st = components[n.id];
+      if (st?.type !== 'esp32') continue;
+      const group = groups.find((g) => g.includes(n)) ?? [];
+      st.busPeers = group.filter((o) => o !== n).map((o) => o.name);
+      if (n.a === n.b) st.rs485Fault = 'A ve B köprülenmiş';
+      else if (swapped.has(n.id)) st.rs485Fault = 'A/B ters bağlı (A başka cihazın B ucunda)';
+    }
+  }
+
   snapshot(): SimSnapshot {
     const nets = this.solveNets();
     const potentials: Record<string, NetPotential> = {};
     this.terminalKeys.forEach((key, i) => (potentials[key] = nets.potential(i)));
     const components: Record<string, ComponentState> = {};
     for (const e of this.entries) components[e.id] = this.componentState(e.device);
+    this.annotateRs485(nets, components);
     return {
       tick: this.tick,
       timeMs: this.tick * TICK_MS,

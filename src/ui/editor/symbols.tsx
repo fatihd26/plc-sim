@@ -1,7 +1,7 @@
 // IEC 60617 esinli sembol çizimleri (yerel koordinat). Durum verilirse canlı gösterilir.
 
 import type { ReactNode } from 'react';
-import { PLC_DI, PLC_DQ, strParam, type CustomDef } from '../../sim/catalog';
+import { ESP32_PINS, PLC_DI, PLC_DQ, strParam, type CustomDef } from '../../sim/catalog';
 import type { ComponentInstance } from '../../sim/schematic';
 import type { ComponentState } from '../../sim/simulation';
 import { geometryOf } from './geometry';
@@ -297,6 +297,38 @@ export function SymbolBody({ inst, state, xrefText }: BodyProps): ReactNode {
           </text>
           <text x={136} y={53} className="sym-text">
             PLC
+          </text>
+        </g>
+      );
+    }
+    case 'esp32': {
+      const s = st(state, 'esp32');
+      return (
+        <g>
+          <rect x={4} y={6} width={g.w - 8} height={g.h - 12} rx={4} className="box" />
+          {ESP32_PINS.map((pin, i) => (
+            <rect
+              key={pin}
+              x={16 + i * 20}
+              y={74}
+              width={8}
+              height={5}
+              className={s?.pins.find((p) => p.pin === pin)?.on ? 'led on' : 'led'}
+            />
+          ))}
+          <rect x={14} y={20} width={8} height={5} className={s?.powered ? 'led on' : 'led'} />
+          <text x={26} y={23} className="sym-text tiny" textAnchor="start">
+            PWR
+          </text>
+          <rect x={104} y={20} width={8} height={5} className={s?.busPeers.length ? 'led on' : s?.rs485Fault ? 'led fault' : 'led'} />
+          <text x={116} y={23} className="sym-text tiny" textAnchor="start">
+            485
+          </text>
+          <text x={80} y={46} className="sym-text">
+            ESP32
+          </text>
+          <text x={120} y={66} className="sym-text tiny">
+            {s ? `${(s.adcMv / 1000).toFixed(1)} V` : '0–10 V'}
           </text>
         </g>
       );

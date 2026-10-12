@@ -2,6 +2,7 @@
 // Konum/döndürme/sayfa/büküm noktaları çizim içindir; çekirdek yalnızca tip, kimlik, parametre
 // ve bağlantıları kullanır.
 
+import { controllerIo } from './ioConfig';
 import {
   CATALOG,
   COMPONENT_TYPES,
@@ -125,6 +126,7 @@ export function validateSchematic(s: Schematic): string[] {
     for (const key of Object.keys(c.params ?? {})) {
       if (!CATALOG[c.type].params.some((p) => p.key === key)) errors.push(`${c.name}: bilinmeyen parametre "${key}"`);
     }
+    for (const e of controllerIo(c).errors) errors.push(`${c.name} G/Ç: ${e}`);
     if (c.program) {
       try {
         compileProgram(c.program);

@@ -82,17 +82,45 @@ export function formatOperand(op: BitOperand): string {
   return isFunc(op) ? `${op.area}${op.index}` : formatAddress(op);
 }
 
-/** Karşılaştırma operandı: tamsayı sabit, zamanlayıcı geçen süresi (ms) veya sayıcı değeri. */
-export type ValueOperand = { area: 'K'; value: number } | FuncAddress;
+// --- Kelime belleği (%MW) ----------------------------------------------------------------------
+// %MW0..%MW63: 16 bit işaretsiz kelimeler. %M bit alanından ayrıdır (Siemens'teki MB/MW çakışması
+// modellenmez). Modbus'ta %MWn = holding register n.
+
+export interface WordAddress {
+  area: 'MW';
+  index: number;
+}
+
+export const MW_COUNT = 64;
+
+const WORD_RE = /^%?MW(\d+)$/;
+
+export function parseWord(text: string): WordAddress | null {
+  const match = WORD_RE.exec(text.trim().toUpperCase());
+  if (!match) return null;
+  const index = Number(match[1]);
+  if (index >= MW_COUNT) throw new Error(`Adres alan dışında: "${text}" (%MW0..%MW${MW_COUNT - 1})`);
+  return { area: 'MW', index };
+}
+
+/**
+ * Karşılaştırma operandı: tamsayı sabit, zamanlayıcı geçen süresi (ms), sayıcı değeri veya
+ * %MW kelimesi.
+ */
+export type ValueOperand = { area: 'K'; value: number } | FuncAddress | WordAddress;
 
 export function parseValue(text: string): ValueOperand {
   const t = text.trim();
   if (/^[+-]?\d+$/.test(t)) return { area: 'K', value: Number(t) };
   const func = parseFunc(t);
   if (func) return func;
-  throw new Error(`Geçersiz değer: "${text}" (tamsayı, T0 = geçen süre ms, C0 = sayıcı değeri)`);
+  const word = parseWord(t);
+  if (word) return word;
+  throw new Error(`Geçersiz değer: "${text}" (tamsayı, T0 = geçen süre ms, C0 = sayıcı değeri, %MW0 = kelime)`);
 }
 
 export function formatValue(op: ValueOperand): string {
-  return op.area === 'K' ? String(op.value) : `${op.area}${op.index}`;
+  if (op.area === 'K') return String(op.value);
+  if (op.area === 'MW') return `%MW${op.index}`;
+  return `${op.area}${op.index}`;
 }

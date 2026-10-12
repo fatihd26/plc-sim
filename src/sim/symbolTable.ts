@@ -3,7 +3,7 @@
 // ilerlenir; ulaşılan ilk "gerçek" elemanın adı adresin etiketi olur. Böylece ladder'daki
 // etiketler eleman adı veya kablolama değişince kendiliğinden güncellenir.
 
-import { PLC_DI, PLC_DQ } from './catalog';
+import { controllerIo } from './ioConfig';
 import { terminalKey, type ComponentInstance, type Schematic, type TerminalRef } from './schematic';
 
 /** Kabloyu olduğu gibi geçiren elemanlar. */
@@ -56,9 +56,12 @@ export function buildSymbolTable(schematic: Schematic, plcId: string): SymbolTab
   };
 
   const table: SymbolTable = {};
-  for (const t of [...PLC_DI, ...PLC_DQ]) {
-    const found = reach({ component: plcId, terminal: t });
-    if (found.length) table[`%${t}`] = found;
+  const ctrl = byId.get(plcId);
+  if (!ctrl) return table;
+  const io = controllerIo(ctrl);
+  for (const p of [...io.inputs, ...io.outputs]) {
+    const found = reach({ component: plcId, terminal: p.terminal });
+    if (found.length) table[p.address] = found;
   }
   return table;
 }

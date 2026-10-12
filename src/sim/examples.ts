@@ -389,6 +389,52 @@ export function timerCounterSchematic(): Schematic {
   };
 }
 
+/**
+ * ESP32 I/O kartı, ladder firmware'i: S1 (GPIO16 → %I0.0) basılınca P1 yanar, bırakıldıktan
+ * 2 s sonra söner (TOF T0 → %Q0.0 → GPIO18 → K1). ADC1 5 V'u geçince (%MW0 > 2047) P2 yanar
+ * (%Q0.1 → GPIO19 → K2). Pin adresleri otomatik eşlenir (girişler %I0.0, çıkışlar %Q0.0'dan). Yükler PLC'deki gibi röle üzerinden beslenir.
+ */
+export function esp32Schematic(): Schematic {
+  begin();
+  const program: LadderProgram = {
+    networks: [
+      {
+        id: 'N1',
+        title: 'S1 bırakılınca 2 s daha',
+        logic: contact('%I0.0', 'S1 (GPIO16)'),
+        coil: { id: 'N1.coil', address: 'T0', type: 'TOF', preset: 2000, label: 'Kapanma gecikmesi' },
+      },
+      network('N2', 'P1 lambası', contact('T0', 'Gecikmeli'), '%Q0.0', 'GPIO18 → K1'),
+      network(
+        'N3',
+        'ADC 5 V üstünde P2',
+        { kind: 'compare', id: `cmp${++k}`, op: '>', a: '%MW0', b: '2047', label: 'ADC ham' },
+        '%Q0.1',
+        'GPIO19 → K2',
+      ),
+    ],
+  };
+  return {
+    version: 2,
+    title: 'ESP32 I/O kartı (ladder)',
+    pages: [{ id: 'p1', title: 'Kumanda' }],
+    ...merge(
+      relayLoad('K1', 80, 440, 'GPIO18', ['P1:X1', 'P1:X2']),
+      relayLoad('K2', 220, 440, 'GPIO19', ['P2:X1', 'P2:X2']),
+      {
+        components: [
+          { id: 'G1', type: 'psu24', name: 'G1', x: 40, y: 20, rotation: 0 },
+          { id: 'S1', type: 'buttonNO', name: 'S1', x: 200, y: 120, rotation: 0 },
+          { id: 'A1', type: 'esp32', name: 'A1', x: 40, y: 260, rotation: 0, program },
+          { id: 'P1', type: 'lamp', name: 'P1', x: 80, y: 580, rotation: 0, params: { color: 'green' } },
+          { id: 'P2', type: 'lamp', name: 'P2', x: 220, y: 580, rotation: 0, params: { color: 'yellow' } },
+        ],
+        wires: [w('G1:L+', 'A1:24V'), w('G1:M', 'A1:GND'), w('G1:L+', 'S1:13'), w('S1:14', 'A1:GPIO16')],
+      },
+    ),
+  };
+}
+
 export interface Example {
   id: string;
   title: string;
@@ -439,5 +485,12 @@ export const EXAMPLES: Example[] = [
     description:
       'S1 basışları CTU ile sayılır, sayım sürerken P2 iki TON ile yanıp söner, 3. basıştan 2 s sonra P1 set edilir; S2 reset eder. Alıştırma: P1 yandıktan 5 s sonra kendiliğinden sönsün (TP veya TOF).',
     build: timerCounterSchematic,
+  },
+  {
+    id: 'esp32',
+    title: 'ESP32 I/O kartı',
+    description:
+      'ESP32 ladder ile programlanır: S1 (GPIO16) bırakıldıktan 2 s sonra P1 söner (TOF), ADC1 5 V üstünde P2 yanar. Programı alt panelden düzenleyin, ADC1\'i Özellikler panelindeki kaydırıcıyla değiştirin. Alıştırma: GPIO17\'ye ikinci bir buton bağlayıp P1\'i sayıcıyla 3 basışta yakın.',
+    build: esp32Schematic,
   },
 ];

@@ -16,6 +16,7 @@ export type ComponentType =
   | 'motor3'
   | 'lamp'
   | 'plc'
+  | 'esp32'
   | 'terminal'
   | 'junction'
   | 'xref'
@@ -88,6 +89,32 @@ export interface ComponentSpec {
 }
 
 export const PLC_DI = ['I0.0', 'I0.1', 'I0.2', 'I0.3', 'I0.4', 'I0.5', 'I0.6', 'I0.7'] as const;
+/** ESP32 I/O kartının G/Ç pinleri (esp32.ts ile aynı sıra). */
+export const ESP32_PINS = ['GPIO16', 'GPIO17', 'GPIO18', 'GPIO19'] as const;
+
+const pinMode = (pin: string, def: 'in' | 'out'): ParamSpec => ({
+  key: `mode_${pin}`,
+  label: `${pin} yönü`,
+  kind: 'enum',
+  default: def,
+  options: [
+    { value: 'in', label: 'Giriş (24 V)' },
+    { value: 'out', label: 'Çıkış (24 V, yalnız röle bobini)' },
+  ],
+});
+
+/** ESP32 pininin process image biti: otomatik veya 0..7 (%I0.n / %Q0.n, yöne göre). */
+const pinAddr = (pin: string): ParamSpec => ({
+  key: `addr_${pin}`,
+  label: `${pin} adresi`,
+  kind: 'enum',
+  default: 'auto',
+  options: [
+    { value: 'auto', label: 'Otomatik (boştaki ilk adres)' },
+    ...Array.from({ length: 8 }, (_, n) => ({ value: String(n), label: `%I0.${n} / %Q0.${n} (yöne göre)` })),
+  ],
+});
+
 export const PLC_DQ = ['Q0.0', 'Q0.1', 'Q0.2', 'Q0.3', 'Q0.4', 'Q0.5', 'Q0.6', 'Q0.7'] as const;
 
 const num = (key: string, label: string, def: number, min: number, max: number, step: number, unit?: string): ParamSpec => ({
@@ -271,6 +298,38 @@ export const CATALOG: Record<ComponentType, ComponentSpec> = {
     description: '24 V DC giriş/çıkış, ladder programı PLC panelinden düzenlenir',
     terminals: ['L+', 'M', ...PLC_DI, ...PLC_DQ],
     params: [num('scanTimeMs', 'Scan süresi', 10, 1, 100, 1, 'ms')],
+  },
+  esp32: {
+    type: 'esp32',
+    title: 'ESP32 I/O kartı',
+    prefix: 'A',
+    category: 'Kontrol',
+    description:
+      '24 V besleme, 4 GPIO (giriş/çıkış seçilebilir, 24 V), ADC1 (0–10 V), RS485 Modbus RTU slave. Çıkışlar yalnız röle bobini sürer',
+    terminals: ['24V', 'GND', 'RS485_A', 'RS485_B', ...ESP32_PINS, 'ADC1'],
+    params: [
+      {
+        key: 'firmware',
+        label: 'Firmware',
+        kind: 'enum',
+        default: 'ladder',
+        options: [
+          { value: 'ladder', label: 'Ladder programı (PLC gibi; alt panelden düzenlenir)' },
+          { value: 'modbusSlave', label: 'Modbus slave G/Ç (coil → çıkış, giriş → DI)' },
+          { value: 'local', label: 'Yerel: giriş çıkışa aktarılır (GPIO16 → 18, 17 → 19)' },
+        ],
+      },
+      ...ESP32_PINS.flatMap((pin, i) => [pinMode(pin, i < 2 ? 'in' : 'out'), pinAddr(pin)]),
+      num('slaveId', 'Modbus adresi', 1, 1, 247, 1),
+      {
+        key: 'baud',
+        label: 'Baud hızı',
+        kind: 'enum',
+        default: '19200',
+        options: ['9600', '19200', '38400', '115200'].map((v) => ({ value: v, label: `${v} bit/s` })),
+      },
+      num('loopMs', 'Firmware döngüsü', 10, 1, 1000, 1, 'ms'),
+    ],
   },
   terminal: {
     type: 'terminal',

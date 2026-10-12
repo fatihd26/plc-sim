@@ -80,8 +80,13 @@
   set, reset; TON, TOF, TP, TONR zamanlayıcıları (T0..T15) ve CTU, CTD, CTUD sayıcıları (C0..C15).
   Komutlar ladder editörünün solundaki ayrı "PLC komutları" menüsünden sürüklenir veya tıklanır
   (şema kütüphanesinde yer almazlar; çizim alanına bırakılamazlar).
-- [ ] **Sayısal veri işlemleri yok.** MOVE, aritmetik ve %MW kelime belleği yok; karşılaştırma
-  yalnız sabit, zamanlayıcı geçen süresi ve sayıcı değeriyle yapılır. Zamanlayıcı/sayıcı belleği
+- [ ] **Sayısal veri işlemleri yok.** %MW0..%MW63 kelime belleği var ve karşılaştırmada
+  okunabilir, Modbus holding register'larıyla yazılabilir; ama ladder'da MOVE ve aritmetik yok.
+- [ ] **Modbus master yok.** ESP32 I/O kartı Modbus slave olarak çalışır ve RS485 kablolamasından
+  bus üyeliği / A-B ters bağlantı bulunur; ama bus üzerinde istek gönderen bir master (PLC tarama
+  tablosu) henüz yok. ESP32 coil'leri şimdilik Özellikler panelindeki test master'ıyla yazılır.
+  Gerçek cihaz köprüsü (HIL) yok. ESP32 ADC değeri şemadan değil, panelden ayarlanır (mantıksal
+  çözücü gerilim taşımaz). Zamanlayıcı/sayıcı belleği
   kalıcı değildir (PLC beslemesi kesilince sıfırlanır).
 - [ ] **Kablo yönlendirme sayfa bazında sırayla yapılır.** Önce çizilen kablo en iyi yolu alır.
   Çok yoğun sayfalarda A* yol bulamazsa basit L/Z güzergâhına düşülür. Taşıma sırasında etkilenen

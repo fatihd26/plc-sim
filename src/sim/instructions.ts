@@ -34,7 +34,7 @@ const cmp = (op: '==' | '<>' | '>' | '>=' | '<' | '<=', title: string): Instruct
   group: 'Karşılaştırma',
   symbol: op,
   title: `Karşılaştır ${op}`,
-  description: `${title}: A ${op} B iken iletir. Operand: tamsayı, T0 (geçen süre ms) veya C0 (sayıcı değeri).`,
+  description: `${title}: A ${op} B iken iletir. Operand: tamsayı, T0 (geçen süre ms), C0 (sayıcı değeri) veya %MW0.`,
   action: { kind: 'element', template: { kind: 'compare', op } },
 });
 

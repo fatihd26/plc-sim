@@ -8,6 +8,8 @@ import type { LadderProgram } from '../sim/ladder';
 import { startStopProgram } from '../sim/programs';
 import { emptySchematic, pagesOf, pageOf, type Schematic } from '../sim/schematic';
 import { buildSymbolTable } from '../sim/symbolTable';
+import { strParam } from '../sim/catalog';
+import { controllerIo, isController } from '../sim/ioConfig';
 import { Canvas, type DragItem, type ViewInfo } from './editor/Canvas';
 import {
   copySelection,
@@ -113,7 +115,7 @@ export function App() {
   const toggleMode = useCallback(() => setMode((m) => (m === 'edit' ? 'sim' : 'edit')), []);
 
   // --- PLC seçimi: seçili PLC, yoksa son seçilen, yoksa ilk PLC ---------------------------
-  const plcs = schematic.components.filter((c) => c.type === 'plc');
+  const plcs = schematic.components.filter((c) => isController(c.type));
   const selectedOne = single(selection);
   const selectedPlc =
     selectedOne?.kind === 'component' && plcs.some((c) => c.id === selectedOne.id) ? selectedOne.id : null;
@@ -121,8 +123,12 @@ export function App() {
     if (selectedPlc) setPlcChoice(selectedPlc);
   }, [selectedPlc]);
   const plc = plcs.find((c) => c.id === plcChoice) ?? plcs[0];
-  const plcState = plc && snapshot?.components[plc.id];
-  const program: LadderProgram = plc?.program ?? startStopProgram;
+  const ctrlState = plc && snapshot?.components[plc.id];
+  // Ladder çalıştıran kontrolörün izleme verisi (PLC veya ladder firmware'li ESP32).
+  const plcState = ctrlState?.type === 'plc' ? ctrlState : ctrlState?.type === 'esp32' ? ctrlState.ladder : null;
+  const program: LadderProgram = plc?.program ?? (plc?.type === 'plc' ? startStopProgram : { networks: [] });
+  const io = useMemo(() => (plc ? controllerIo(plc) : { inputs: [], outputs: [] }), [plc]);
+  const ladderOff = plc?.type === 'esp32' && strParam(plc, 'firmware') !== 'ladder';
   // Ladder editöründe seçili eleman; sol kütüphaneden eklenen komutlar da buna göre yerleşir.
   const [ladderSel, setLadderSel] = useState<string | null>(null);
   useEffect(() => setLadderSel(null), [plc?.id]);
@@ -297,7 +303,7 @@ export function App() {
           {snapshot ? (
             <>
               t = {(snapshot.timeMs / 1000).toFixed(3)} s
-              {plcState?.type === 'plc' && (
+              {plcState && (
                 <>
                   {' '}
                   · {plc!.name} scan #{plcState.scanCount} · T<sub>scan</sub> = {plcState.scanTimeMs} ms
@@ -413,11 +419,11 @@ export function App() {
           {plcOpen && (
             <section className="bottom-dock">
               <header className="dock-title">
-                {edit ? 'PLC programı' : 'PLC: online izleme ve I/O'}
+                {edit ? 'Program (PLC / ESP32)' : 'Online izleme ve I/O'}
                 {plcs.length > 0 && (
                   <select
                     className="plc-select"
-                    aria-label="İzlenen PLC"
+                    aria-label="İzlenen kontrolör"
                     value={plc?.id}
                     onChange={(e) => setPlcChoice(e.target.value)}
                   >
@@ -433,8 +439,15 @@ export function App() {
                 </button>
               </header>
               {!plc ? (
-                <p className="dock-note">Şemada PLC yok. Kütüphaneden bir PLC ekleyin.</p>
+                <p className="dock-note">Şemada PLC veya ESP32 yok. Kütüphaneden bir PLC ya da ESP32 I/O kartı ekleyin.</p>
               ) : edit ? (
+                <>
+                {ladderOff && (
+                  <p className="dock-note warn">
+                    {plc.name} firmware'i "Ladder programı" değil; bu program çalışmaz. ESP32'nin Firmware ayarını
+                    "Ladder programı" yapın.
+                  </p>
+                )}
                 <LadderEditor
                   key={plc.id}
                   program={program}
@@ -442,18 +455,23 @@ export function App() {
                   onChange={(p) => dispatch({ type: 'setProgram', id: plc.id, program: p })}
                   selected={ladderSel}
                   onSelect={setLadderSel}
+                  controller={plc}
+                  onParams={(params) => dispatch({ type: 'setParams', id: plc.id, params })}
                 />
-              ) : plcState?.type === 'plc' ? (
+                </>
+              ) : plcState ? (
                 <div className="bottom-body">
                   <div className="ladder-pane">
                     <LadderView networks={program.networks} trace={plcState.trace} symbols={symbols} />
                   </div>
                   <div className="io-pane">
-                    <IoTable plc={plcState} symbols={symbols} program={program} />
+                    <IoTable plc={plcState} io={io} symbols={symbols} program={program} />
                   </div>
                 </div>
               ) : (
-                <p className="dock-note">Simülasyon kurulamadı.</p>
+                <p className="dock-note">
+                  {ladderOff ? `${plc.name} ladder programı çalıştırmıyor (firmware ayarı).` : 'Simülasyon kurulamadı.'}
+                </p>
               )}
             </section>
           )}

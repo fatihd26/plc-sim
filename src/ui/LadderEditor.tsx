@@ -2,7 +2,7 @@
 // zamanlayıcı, sayıcı), network ekleme/sıralama, seri/paralel bağlama ve eleman özellikleri.
 // Program PLC bileşen örneğinde saklanır; her değişiklik tek bir geri alınabilir adımdır.
 
-import { useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { formatOperand, formatValue, parseOperand, parseValue } from '../sim/address';
 import { INSTR_MIME, INSTRUCTION_GROUPS, INSTRUCTIONS, type Instruction } from '../sim/instructions';
 import {
@@ -32,7 +32,11 @@ import {
   updateContact,
   type CoilPatch,
 } from '../sim/ladderEdit';
-import { symbolName, type SymbolTable } from '../sim/symbolTable';
+import type { ParamValue } from '../sim/catalog';
+import { controllerIo } from '../sim/ioConfig';
+import type { ComponentInstance } from '../sim/schematic';
+import type { SymbolTable } from '../sim/symbolTable';
+import { IoConfigPanel, IoContext, IoDatalist, IoHint, type IoInfo } from './IoConfigPanel';
 import { formatMs, LadderView } from './LadderView';
 
 interface Props {
@@ -41,6 +45,10 @@ interface Props {
   onChange(program: LadderProgram): void;
   selected: string | null;
   onSelect(id: string | null): void;
+  /** Programın ait olduğu kontrolör (PLC veya ESP32): G/Ç eşlemesi için. */
+  controller?: ComponentInstance;
+  /** Kontrolör parametrelerini değiştirir (ESP32 pin yönü/adresi). */
+  onParams?(params: Record<string, ParamValue>): void;
 }
 
 type Check = { ok: string } | { error: string };
@@ -62,8 +70,17 @@ const CONTACT_OPTIONS: { value: ContactType; label: string }[] = [
 
 const OUTPUT_OPTIONS = INSTRUCTIONS.filter((i) => i.action.kind === 'output');
 
-export function LadderEditor({ program, symbols, onChange, selected, onSelect }: Props) {
+export function LadderEditor({ program, symbols, onChange, selected: sel, onSelect: select, controller, onParams }: Props) {
   const [parallelMode, setParallelMode] = useState(false);
+  const [showIo, setShowIo] = useState(false);
+  // Eleman seçilince G/Ç paneli kapanır, özellik formu açılır.
+  const selected = showIo ? null : sel;
+  const onSelect = (id: string | null) => {
+    setShowIo(false);
+    select(id);
+  };
+  const io = useMemo(() => (controller ? controllerIo(controller) : null), [controller]);
+  const ioInfo: IoInfo | null = controller && io ? { controller, io, symbols, openIo: () => setShowIo(true) } : null;
   const net = program.networks.find((n) => n.id === selected || n.coil.id === selected);
   const element = selected ? findElement(program, selected) : undefined;
   const owner = selected ? networkOf(program, selected) : undefined;
@@ -96,6 +113,7 @@ export function LadderEditor({ program, symbols, onChange, selected, onSelect }:
   };
 
   return (
+    <IoContext.Provider value={ioInfo}>
     <div className="ladder-editor">
       <div className="ladder-toolbar" role="toolbar" aria-label="Ladder düzenleme">
         <button type="button" onClick={() => apply(addNetwork(program))}>
@@ -141,8 +159,22 @@ export function LadderEditor({ program, symbols, onChange, selected, onSelect }:
         >
           Network sil
         </button>
+        {controller && (
+          <>
+            <span className="sep" />
+            <button
+              type="button"
+              className={showIo ? 'active' : undefined}
+              aria-pressed={showIo}
+              title="Hangi %I/%Q adresinin hangi terminale/GPIO pinine bağlı olduğu"
+              onClick={() => setShowIo((v) => !v)}
+            >
+              ⚙ G/Ç eşlemesi{io?.errors.length ? ' ⚠' : ''}
+            </button>
+          </>
+        )}
       </div>
-      <div className="ladder-edit-body with-palette">
+      <div className={`ladder-edit-body with-palette${showIo ? ' io-open' : ''}`}>
         <InstructionPalette onPick={insert} parallel={parallelMode} onParallel={setParallelMode} />
         <div className="ladder-canvas">
           <LadderView
@@ -154,7 +186,16 @@ export function LadderEditor({ program, symbols, onChange, selected, onSelect }:
           />
         </div>
         <div className="ladder-inspector">
-          {element?.kind === 'contact' ? (
+          {showIo && controller && io ? (
+            <IoConfigPanel
+              controller={controller}
+              io={io}
+              symbols={symbols}
+              program={program}
+              onParams={onParams}
+              onClose={() => setShowIo(false)}
+            />
+          ) : element?.kind === 'contact' ? (
             <AddressForm
               key={element.id + element.address}
               title="Kontak"
@@ -218,6 +259,7 @@ export function LadderEditor({ program, symbols, onChange, selected, onSelect }:
         </div>
       </div>
     </div>
+    </IoContext.Provider>
   );
 }
 
@@ -314,34 +356,33 @@ function AddressForm(props: {
   onAddress(address: string): void;
   onLabel(label: string): void;
   children?: ReactNode;
+  /** Öneri listesinde yalnız çıkışlar (bobin). */
+  outputsOnly?: boolean;
 }) {
   const [text, setText] = useState(props.address);
   const check = props.check(text);
   const commit = () => {
     if ('ok' in check && check.ok !== props.address) props.onAddress(check.ok);
   };
-  const sym = 'ok' in check ? symbolName(props.symbols, check.ok) : '';
+  const listId = `io-list-${props.outputsOnly ? 'out' : 'all'}`;
   return (
     <div className="element-form">
       <h4>{props.title}</h4>
       {props.children}
+      <IoDatalist id={listId} outputsOnly={props.outputsOnly} />
       <label>
         Adres
         <input
           className="mono"
+          list={listId}
+          placeholder="listeden seçin veya yazın"
           value={text}
           onChange={(e) => setText(e.target.value)}
           onBlur={commit}
           onKeyDown={(e) => e.key === 'Enter' && commit()}
         />
       </label>
-      {'error' in check ? (
-        <p className="error small">{check.error}</p>
-      ) : (
-        <p className="muted small">
-          {/^[TC]/.test(check.ok) ? `${check.ok[0] === 'T' ? 'Zamanlayıcı' : 'Sayıcı'} çıkışı (Q)` : `Şemada: ${sym || 'bağlı eleman yok'}`}
-        </p>
-      )}
+      {'error' in check ? <p className="error small">{check.error}</p> : <IoHint address={check.ok} />}
       <LabelInput label={props.label} onLabel={props.onLabel} />
     </div>
   );
@@ -421,7 +462,7 @@ function CompareForm(props: {
         </select>
       </label>
       <CheckedInput label="B" value={props.b} check={check} onCommit={(b) => props.onPatch({ b })} />
-      <p className="muted small">Operand: tamsayı, T0 (geçen süre, ms) veya C0 (sayıcı değeri).</p>
+      <p className="muted small">Operand: tamsayı, T0 (geçen süre, ms), C0 (sayıcı değeri) veya %MW0 (kelime).</p>
       <LabelInput label={props.label} onLabel={(label) => props.onPatch({ label })} />
     </div>
   );
@@ -457,6 +498,7 @@ function OutputForm({
     return (
       <AddressForm
         key={coil.address}
+        outputsOnly={type !== 'reset'}
         title="Çıkış"
         address={coil.address}
         label={coil.label ?? ''}

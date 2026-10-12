@@ -12,6 +12,7 @@ import {
   type LadderTrace,
   type Runtime,
 } from './ladder';
+import type { ModbusDataModel } from './modbus';
 
 export class Plc {
   /** DI modülünün fiziksel giriş terminalleri (kablolama tarafından sürülür). */
@@ -89,6 +90,30 @@ export class Plc {
   /** Sayıcıların değeri ve çıkışı. */
   counters(): { cv: number; q: boolean }[] {
     return this.runtime.counters.map((c) => ({ cv: c.cv, q: c.q }));
+  }
+
+  /** Kelime yazar (ör. ADC değeri); 0..65535'e kırpılır. */
+  setWord(index: number, value: number): void {
+    this.runtime.words[index] = Math.max(0, Math.min(0xffff, Math.round(value)));
+  }
+
+  /** %MW kelimelerinin kopyası. */
+  wordsCopy(): number[] {
+    return [...this.runtime.words];
+  }
+
+  /**
+   * PLC'yi Modbus slave olarak gösteren görünüm; diziler process image'ın kendisidir:
+   * coil n ↔ %Q (bit n), discrete input n ↔ %I (bit n), holding register n ↔ %MWn.
+   * Program aynı %Q bitine yazıyorsa sonraki scan Modbus'un yazdığını ezer (gerçek PLC gibi).
+   */
+  modbusModel(): ModbusDataModel {
+    return {
+      coils: this.image.Q,
+      discreteInputs: this.image.I,
+      holdingRegisters: this.runtime.words,
+      inputRegisters: new Uint16Array(0),
+    };
   }
 
   imageCopy(area: Area): boolean[] {

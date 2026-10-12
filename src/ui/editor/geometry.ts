@@ -102,6 +102,21 @@ export const GEOMETRY: Record<BuiltinType, SymbolGeo> = {
       })),
     ],
   },
+  esp32: {
+    w: 160,
+    h: 100,
+    terminals: [
+      top('24V', 20),
+      top('GND', 40),
+      top('RS485_A', 100),
+      top('RS485_B', 120),
+      bottom('GPIO16', 20, 100),
+      bottom('GPIO17', 40, 100),
+      bottom('GPIO18', 60, 100),
+      bottom('GPIO19', 80, 100),
+      bottom('ADC1', 120, 100),
+    ],
+  },
   plc: {
     w: 220,
     h: 100,

@@ -1,11 +1,9 @@
-import { PLC_DI, PLC_DQ } from '../sim/catalog';
+import type { IoPoint } from '../sim/ioConfig';
 import { parseFunc } from '../sim/address';
 import { isCounter, isTimer, type LadderProgram } from '../sim/ladder';
 import { formatMs } from './LadderView';
-import type { ComponentState } from '../sim/simulation';
+import type { PlcRuntimeState } from '../sim/simulation';
 import type { SymbolTable } from '../sim/symbolTable';
-
-type PlcState = Extract<ComponentState, { type: 'plc' }>;
 
 function Bit({ on }: { on: boolean }) {
   return <span className={`bit ${on ? 'on' : ''}`}>{on ? '1' : '0'}</span>;
@@ -15,7 +13,24 @@ function Bit({ on }: { on: boolean }) {
  * Fiziksel terminal ile process image'ı yan yana göstererek scan gecikmesini görünür kılar.
  * Bağlantı sütunu sembol tablosundan gelir: klemens, bağlantı noktası ve sayfa geçişleri üzerinden.
  */
-export function IoTable({ plc, symbols, program }: { plc: PlcState; symbols: SymbolTable; program?: LadderProgram }) {
+/** Process image biti: "%I0.3" → 3, "%I1.0" → 8. */
+const bitOf = (address: string) => {
+  const [byte, bit] = address.slice(2).split('.').map(Number) as [number, number];
+  return byte * 8 + bit;
+};
+
+export function IoTable({
+  plc,
+  io,
+  symbols,
+  program,
+}: {
+  plc: PlcRuntimeState;
+  /** Kontrolörün fiziksel G/Ç noktaları (catalog.controllerIo). */
+  io: { inputs: IoPoint[]; outputs: IoPoint[] };
+  symbols: SymbolTable;
+  program?: LadderProgram;
+}) {
   // Programda kullanılan zamanlayıcı ve sayıcılar (adres sırasıyla, tekrarsız).
   const funcs = new Map<string, { type: string; preset: number; index: number }>();
   for (const n of program?.networks ?? []) {
@@ -25,10 +40,13 @@ export function IoTable({ plc, symbols, program }: { plc: PlcState; symbols: Sym
     }
   }
   const funcRows = [...funcs.entries()].sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }));
-  const row = (terminal: string, before: boolean, after: boolean) => (
-    <tr key={terminal}>
-      <td className="mono">%{terminal}</td>
-      <td className="mono">{symbols[`%${terminal}`]?.join(', ') || <span className="muted">—</span>}</td>
+  const row = ({ address, terminal }: IoPoint, before: boolean, after: boolean) => (
+    <tr key={address}>
+      <td className="mono">
+        {address}
+        {terminal !== address.slice(1) && <span className="muted"> {terminal}</span>}
+      </td>
+      <td className="mono">{symbols[address]?.join(', ') || <span className="muted">—</span>}</td>
       <td><Bit on={before} /></td>
       <td><Bit on={after} /></td>
     </tr>
@@ -47,11 +65,11 @@ export function IoTable({ plc, symbols, program }: { plc: PlcState; symbols: Sym
         <tr className="group">
           <td colSpan={4}>Girişler: terminal → PII (scan başında)</td>
         </tr>
-        {PLC_DI.map((t, i) => row(t, plc.diTerminals[i]!, plc.pii[i]!))}
+        {io.inputs.map((p) => row(p, plc.diTerminals[bitOf(p.address)] ?? false, plc.pii[bitOf(p.address)] ?? false))}
         <tr className="group">
           <td colSpan={4}>Çıkışlar: PIQ → terminal (scan sonunda)</td>
         </tr>
-        {PLC_DQ.map((t, i) => row(t, plc.piq[i]!, plc.dqTerminals[i]!))}
+        {io.outputs.map((p) => row(p, plc.piq[bitOf(p.address)] ?? false, plc.dqTerminals[bitOf(p.address)] ?? false))}
         {funcRows.length > 0 && (
           <tr className="group">
             <td colSpan={4}>Zamanlayıcı / sayıcı: değer / ön ayar, Q</td>
