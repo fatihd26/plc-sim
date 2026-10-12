@@ -3,7 +3,15 @@
 // okunur ve scan sonunda yazılır.
 
 import { AREA_BYTES, bitIndex, type Area, type BitAddress } from './address';
-import { compileProgram, executeProgram, type CompiledProgram, type LadderProgram, type LadderTrace } from './ladder';
+import {
+  compileProgram,
+  createRuntime,
+  executeProgram,
+  type CompiledProgram,
+  type LadderProgram,
+  type LadderTrace,
+  type Runtime,
+} from './ladder';
 
 export class Plc {
   /** DI modülünün fiziksel giriş terminalleri (kablolama tarafından sürülür). */
@@ -20,14 +28,19 @@ export class Plc {
 
   private readonly program: CompiledProgram;
   private trace: LadderTrace = {};
+  /** Zamanlayıcı, sayıcı ve kenar belleği (kalıcı değil: besleme kesilince sıfırlanır). */
+  private runtime: Runtime = createRuntime();
   scanCount = 0;
 
   constructor(program: LadderProgram) {
     this.program = compileProgram(program);
   }
 
-  /** Tek bir scan-cycle: girişleri oku → programı çalıştır → çıkışları yaz. */
-  scan(): void {
+  /**
+   * Tek bir scan-cycle: girişleri oku → programı çalıştır → çıkışları yaz.
+   * `dtMs`: önceki scan'den bu yana geçen süre (zamanlayıcılar bununla ilerler).
+   */
+  scan(dtMs = 0): void {
     // 1. Giriş terminalleri → PII (scan boyunca sabit kalır)
     for (let i = 0; i < this.diTerminals.length; i++) this.image.I[i] = this.diTerminals[i]!;
 
@@ -36,6 +49,8 @@ export class Plc {
       this.program,
       (a) => this.readBit(a),
       (a, v) => this.writeBit(a, v),
+      this.runtime,
+      dtMs,
     );
 
     // 3. PIQ → çıkış terminalleri
@@ -50,6 +65,7 @@ export class Plc {
     this.diTerminals.fill(false);
     this.dqTerminals.fill(false);
     this.trace = {};
+    this.runtime = createRuntime();
   }
 
   readBit(addr: BitAddress): boolean {
@@ -63,6 +79,16 @@ export class Plc {
   /** Son scan'in güç akışı izleme verisi. */
   get lastTrace(): LadderTrace {
     return this.trace;
+  }
+
+  /** Zamanlayıcıların geçen süresi [ms] ve çıkışı. */
+  timers(): { et: number; q: boolean }[] {
+    return this.runtime.timers.map((t) => ({ et: t.et, q: t.q }));
+  }
+
+  /** Sayıcıların değeri ve çıkışı. */
+  counters(): { cv: number; q: boolean }[] {
+    return this.runtime.counters.map((c) => ({ cv: c.cv, q: c.q }));
   }
 
   imageCopy(area: Area): boolean[] {

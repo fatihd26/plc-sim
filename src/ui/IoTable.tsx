@@ -1,4 +1,7 @@
 import { PLC_DI, PLC_DQ } from '../sim/catalog';
+import { parseFunc } from '../sim/address';
+import { isCounter, isTimer, type LadderProgram } from '../sim/ladder';
+import { formatMs } from './LadderView';
 import type { ComponentState } from '../sim/simulation';
 import type { SymbolTable } from '../sim/symbolTable';
 
@@ -12,7 +15,16 @@ function Bit({ on }: { on: boolean }) {
  * Fiziksel terminal ile process image'ı yan yana göstererek scan gecikmesini görünür kılar.
  * Bağlantı sütunu sembol tablosundan gelir: klemens, bağlantı noktası ve sayfa geçişleri üzerinden.
  */
-export function IoTable({ plc, symbols }: { plc: PlcState; symbols: SymbolTable }) {
+export function IoTable({ plc, symbols, program }: { plc: PlcState; symbols: SymbolTable; program?: LadderProgram }) {
+  // Programda kullanılan zamanlayıcı ve sayıcılar (adres sırasıyla, tekrarsız).
+  const funcs = new Map<string, { type: string; preset: number; index: number }>();
+  for (const n of program?.networks ?? []) {
+    const f = parseFunc(n.coil.address);
+    if (f && (isTimer(n.coil.type) || isCounter(n.coil.type))) {
+      funcs.set(n.coil.address, { type: n.coil.type!, preset: n.coil.preset ?? 0, index: f.index });
+    }
+  }
+  const funcRows = [...funcs.entries()].sort(([a], [b]) => a.localeCompare(b, 'en', { numeric: true }));
   const row = (terminal: string, before: boolean, after: boolean) => (
     <tr key={terminal}>
       <td className="mono">%{terminal}</td>
@@ -40,6 +52,28 @@ export function IoTable({ plc, symbols }: { plc: PlcState; symbols: SymbolTable 
           <td colSpan={4}>Çıkışlar: PIQ → terminal (scan sonunda)</td>
         </tr>
         {PLC_DQ.map((t, i) => row(t, plc.piq[i]!, plc.dqTerminals[i]!))}
+        {funcRows.length > 0 && (
+          <tr className="group">
+            <td colSpan={4}>Zamanlayıcı / sayıcı: değer / ön ayar, Q</td>
+          </tr>
+        )}
+        {funcRows.map(([addr, f]) => {
+          const timer = addr.startsWith('T');
+          const st = timer ? plc.timers[f.index] : plc.counters[f.index];
+          const value = timer ? formatMs((st as { et: number }).et) : String((st as { cv: number }).cv);
+          return (
+            <tr key={addr}>
+              <td className="mono">{addr}</td>
+              <td className="mono">{f.type}</td>
+              <td className="mono">
+                {value} / {timer ? formatMs(f.preset) : f.preset}
+              </td>
+              <td>
+                <Bit on={st?.q ?? false} />
+              </td>
+            </tr>
+          );
+        })}
       </tbody>
     </table>
   );

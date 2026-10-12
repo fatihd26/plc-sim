@@ -482,6 +482,42 @@ ul.xref-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px;
 .network figcaption.pickable { cursor: pointer; border-radius: 4px; padding: 0 4px; }
 .network.selected figcaption { background: var(--accent-soft); outline: 1px solid var(--accent); }
 
+/* Ladder komutları: kutu (karşılaştırma, zamanlayıcı, sayıcı) ve sembol harfleri */
+.ladder .box { fill: var(--panel); stroke: var(--text); stroke-width: 2; }
+.ladder .box.on { fill: var(--on-soft); stroke: var(--on); }
+.ladder .op { font: 600 12px ui-monospace, Consolas, monospace; fill: var(--text); text-anchor: middle; }
+.ladder .contact.closed .op, .ladder .coil.on .op { fill: var(--on); }
+.ladder .box-title { font: 700 11px ui-monospace, Consolas, monospace; fill: var(--text); text-anchor: middle; }
+.ladder .box-line { font: 10px ui-monospace, Consolas, monospace; fill: var(--muted); }
+
+/* Komut sürükle-bırak hedefleri */
+.ladder .drop-target .pick { fill: var(--on-soft); stroke: var(--on); stroke-width: 2; stroke-dasharray: 4 3; }
+.network.drop-target { outline: 2px dashed var(--on); outline-offset: 2px; border-radius: 4px; }
+.ladder .drop-hint { margin: 4px 0 0; padding: 10px; font-size: 11px; color: var(--muted); text-align: center; border: 1px dashed var(--border); border-radius: 6px; }
+.ladder.drop-empty .drop-hint { border-color: var(--on); color: var(--on); background: var(--on-soft); }
+
+/* PLC komutları menüsü (ladder editörünün solunda) */
+.ladder-edit-body.with-palette { grid-template-columns: 190px minmax(0, 1fr) 230px; }
+.instr-palette { border-right: 1px solid var(--border); overflow-y: auto; padding: 6px 8px; background: var(--panel-2); }
+.instr-head { display: flex; align-items: center; justify-content: space-between; font-size: 12px; margin-bottom: 4px; }
+.instr-mode { display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--muted); }
+.instr-search { width: 100%; font-size: 12px; margin-bottom: 2px; }
+.instr-tip { margin: 2px 0 4px; font-size: 10px; color: var(--muted); }
+.instr-palette h5 { margin: 6px 0 2px; font-size: 11px; font-weight: 600; color: var(--muted); }
+.instr-palette h5 .cat-toggle { padding: 2px 0; font-size: 11px; }
+.instr-palette ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.instr-palette .instr {
+  width: 100%; display: flex; align-items: center; gap: 6px; padding: 3px 4px; font-size: 12px;
+  text-align: left; cursor: grab; background: var(--panel);
+}
+.instr-palette .instr-symbol { flex: none; width: 38px; text-align: center; font-weight: 600; font-size: 11px; }
+.instr-palette .instr-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Sol kütüphane: PLC komutlarının ayrı menüde olduğunu belirten not */
+.library .plc-hint { margin: 10px; padding: 8px 10px; border: 1px dashed var(--border); border-radius: 6px; font-size: 11px; color: var(--muted); }
+.library .plc-hint p { margin: 0 0 6px; }
+.library .plc-hint button { width: 100%; font-size: 12px; }
+
 /* Dar ekran: çizim alanı tam genişlikte. Kütüphane, Özellikler ve PLC paneli alttaki sekmelerden
    açılan, çizim alanının üstüne binen çekmecelerdir (App.tsx: Sheet). Kırılım NARROW_QUERY ile aynı. */
 .sheet-tabs { display: flex; background: var(--panel); border-top: 1px solid var(--border); }
@@ -503,7 +539,8 @@ ul.xref-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px;
   .workspace > .dock { display: none; }
   .app[data-sheet='library'] .library, .app[data-sheet='properties'] .properties { display: flex; }
   .dock-title { border-radius: 12px 12px 0 0; }
-  .bottom-body, .ladder-edit-body { grid-template-columns: minmax(0, 1fr); }
+  .bottom-body, .ladder-edit-body, .ladder-edit-body.with-palette { grid-template-columns: minmax(0, 1fr); }
+  .instr-palette { border-right: none; border-bottom: 1px solid var(--border); max-height: 180px; }
   .io-pane, .ladder-inspector { border-left: none; border-top: 1px solid var(--border); }
 
   .titlebar { gap: 10px; padding: 6px 10px; }

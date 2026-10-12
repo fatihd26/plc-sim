@@ -57,6 +57,11 @@ npm run build      # tip kontrolü + üretim derlemesi
 | Bağlantı | Klemens (X), bağlantı noktası (J), sayfa geçişi (XR) |
 | Kullanıcı | Kutup türlerinden tanımlanan bileşenler (proje dosyasında saklanır) |
 
+PLC komutları şemaya değil PLC programına eklendiği için sol kütüphanede değil, alt paneldeki
+ladder editörünün solundaki **PLC komutları** menüsündedir: kontak NO/NC/P/N, karşılaştırma,
+bobin/ters bobin/set/reset, TON/TOF/TP/TONR (T0..T15), CTU/CTD/CTUD (C0..C15). Komut ladder
+üzerine sürüklenir (elemana: sağına seri, Shift ile paralel; boş alana: yeni network) veya tıklanır.
+
 Parametreler `sim/catalog.ts` içinde tip başına tanımlıdır ve Özellikler panelinde düzenlenir.
 
 Yeni bir yerleşik tip eklemek için: `sim/catalog.ts` (terminaller, parametreler), `sim/simulation.ts`
@@ -69,7 +74,8 @@ kütüphanedeki "Yeni bileşen tanımla" kullanılır.
 ```
 src/sim/   Simülasyon çekirdeği (saf TS; React/DOM/Math.random/Date.now yasak — purity.test.ts denetler)
   address.ts      %I/%Q/%M bit adresleme
-  ladder.ts       Ladder modeli (seri/paralel ağaç), derleme, güç akışı değerlendirme
+  ladder.ts       Ladder modeli (seri/paralel ağaç), derleme, güç akışı, zamanlayıcı/sayıcı yürütme
+  instructions.ts Ladder komut kütüphanesi (palet ve sol kütüphane)
   ladderEdit.ts   Ladder üzerinde saf düzenleme işlemleri (seri/paralel ekle, sil, normalize)
   symbolTable.ts  PLC adresi → kablolamadan bulunan şema elemanı
   plc.ts          Terminaller, process image (PII/PIQ/M), scan()

@@ -21,6 +21,8 @@ interface Props {
   disabled: boolean;
   library: CustomDef[];
   dispatch(action: EditorAction): void;
+  /** PLC programı panelini (PLC komutları menüsüyle) açar. */
+  onOpenPlc(): void;
   onDrag(item: DragItem | null): void;
   /** Tıklanan öğe: çizim alanına bir tıklamayla yerleştirilir (dokunmatik için). */
   placing: DragItem | null;
@@ -61,9 +63,12 @@ function entries(library: CustomDef[]): Entry[] {
   return [...builtin, ...custom];
 }
 
-export function LibraryPanel({ disabled, library, dispatch, onDrag, placing, onPlace }: Props) {
+export function LibraryPanel({ disabled, library, dispatch, onOpenPlc, onDrag, placing, onPlace }: Props) {
   const [query, setQuery] = useState('');
-  const [collapsed, setCollapsed] = useState<Partial<Record<Category, boolean>>>({});
+  // Kategoriler başlangıçta kapalıdır; arama yapılırken eşleşenler açık gösterilir.
+  const [collapsed, setCollapsed] = useState<Partial<Record<Category, boolean>>>(() =>
+    Object.fromEntries(CATEGORIES.map((c) => [c, true])),
+  );
   const [editing, setEditing] = useState<CustomDef | null>(null);
   const q = query.trim().toLocaleLowerCase('tr');
   const all = entries(library);
@@ -164,6 +169,14 @@ export function LibraryPanel({ disabled, library, dispatch, onDrag, placing, onP
           );
         })}
         {visible.length === 0 && q && <p className="dock-note">Aramayla eşleşen eleman yok.</p>}
+        <div className="plc-hint">
+          <p>
+            Zamanlayıcı, sayıcı, set/reset, karşılaştırma gibi komutlar şemaya değil, PLC programına eklenir.
+          </p>
+          <button type="button" onClick={onOpenPlc}>
+            PLC komutları menüsünü aç
+          </button>
+        </div>
       </div>
       {editing && (
         <CustomEditor

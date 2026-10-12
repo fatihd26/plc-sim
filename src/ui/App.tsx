@@ -123,6 +123,9 @@ export function App() {
   const plc = plcs.find((c) => c.id === plcChoice) ?? plcs[0];
   const plcState = plc && snapshot?.components[plc.id];
   const program: LadderProgram = plc?.program ?? startStopProgram;
+  // Ladder editöründe seçili eleman; sol kütüphaneden eklenen komutlar da buna göre yerleşir.
+  const [ladderSel, setLadderSel] = useState<string | null>(null);
+  useEffect(() => setLadderSel(null), [plc?.id]);
   const symbols = useMemo(() => (plc ? buildSymbolTable(schematic, plc.id) : {}), [schematic, plc?.id]);
 
   // Butonların basılı durumu çekirdekten okunur (tek doğruluk kaynağı).
@@ -361,6 +364,10 @@ export function App() {
           disabled={!edit}
           library={schematic.library ?? []}
           dispatch={dispatch}
+          onOpenPlc={() => {
+            setMode('edit');
+            setPlcOpen(true);
+          }}
           onDrag={setDrag}
           placing={edit ? placing : null}
           onPlace={(item) => {
@@ -433,6 +440,8 @@ export function App() {
                   program={program}
                   symbols={symbols}
                   onChange={(p) => dispatch({ type: 'setProgram', id: plc.id, program: p })}
+                  selected={ladderSel}
+                  onSelect={setLadderSel}
                 />
               ) : plcState?.type === 'plc' ? (
                 <div className="bottom-body">
@@ -440,7 +449,7 @@ export function App() {
                     <LadderView networks={program.networks} trace={plcState.trace} symbols={symbols} />
                   </div>
                   <div className="io-pane">
-                    <IoTable plc={plcState} symbols={symbols} />
+                    <IoTable plc={plcState} symbols={symbols} program={program} />
                   </div>
                 </div>
               ) : (

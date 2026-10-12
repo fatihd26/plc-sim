@@ -291,6 +291,77 @@ export function tankSchematic(): Schematic {
   };
 }
 
+/**
+ * Zamanlayıcı ve sayıcı: S1 basışları C0 (CTU, PV 3) ile sayılır. Sayım sürerken P2 yanıp söner
+ * (T1/T2 flaşör). 3. basıştan 2 s sonra (T0, TON) P1 set edilir. S2 (stop) sayıcıyı ve P1'i
+ * sıfırlar.
+ */
+export function timerCounterSchematic(): Schematic {
+  begin();
+  const box = (id: string, title: string, logic: LadderNode, coil: Network['coil']): Network => ({ id, title, logic, coil });
+  const program: LadderProgram = {
+    networks: [
+      box('N1', 'Start basışlarını say', contact('%I0.0', 'Start'), {
+        id: 'N1.coil',
+        address: 'C0',
+        type: 'CTU',
+        preset: 3,
+        label: 'Basış sayısı',
+      }),
+      box('N2', '3 basış olunca 2 s bekle', contact('C0', 'Sayım tamam'), {
+        id: 'N2.coil',
+        address: 'T0',
+        type: 'TON',
+        preset: 2000,
+        label: 'Gecikme',
+      }),
+      box('N3', 'Süre dolunca P1 yanar (set)', contact('T0', 'Gecikme bitti'), {
+        id: 'N3.coil',
+        address: '%Q0.0',
+        type: 'set',
+        label: 'Hazır',
+      }),
+      box('N4', 'Stop: sayıcıyı sıfırla', contact('%I0.1', 'Stop', 'NC'), {
+        id: 'N4.coil',
+        address: 'C0',
+        type: 'reset',
+      }),
+      box('N5', 'Stop: P1 söner (reset)', contact('%I0.1', 'Stop', 'NC'), {
+        id: 'N5.coil',
+        address: '%Q0.0',
+        type: 'reset',
+        label: 'Hazır',
+      }),
+      box(
+        'N6',
+        'Flaşör: sayım varken T1 çalışır',
+        series({ kind: 'compare', id: `cmp${++k}`, op: '>', a: 'C0', b: '0', label: 'Sayım var' }, contact('T2', 'Flaşör', 'NC')),
+        { id: 'N6.coil', address: 'T1', type: 'TON', preset: 500, label: 'Yanık süre' },
+      ),
+      box('N7', 'Flaşör: T2 sönük süre', contact('T1', 'Flaşör'), {
+        id: 'N7.coil',
+        address: 'T2',
+        type: 'TON',
+        preset: 500,
+        label: 'Sönük süre',
+      }),
+      network('N8', 'P2 yanıp söner (sayım sürüyor)', series(contact('T1', 'Flaşör'), contact('%Q0.0', 'Hazır', 'NC')), '%Q0.1', 'Sayıyor'),
+    ],
+  };
+  return {
+    version: 2,
+    title: 'Zamanlayıcı ve sayıcı',
+    pages: [{ id: 'p1', title: 'Kumanda' }],
+    ...merge(controlPanel(40, program), {
+      components: [
+        { id: 'P1', type: 'lamp', name: 'P1', x: 120, y: 460, rotation: 0, params: { voltage: '24DC', color: 'green' } },
+        { id: 'P2', type: 'lamp', name: 'P2', x: 200, y: 460, rotation: 0, params: { voltage: '24DC', color: 'yellow' } },
+      ],
+      wires: [w('A1:Q0.0', 'P1:X1'), w('P1:X2', 'G1:M'), w('A1:Q0.1', 'P2:X1'), w('P2:X2', 'G1:M')],
+    }),
+  };
+}
+
 export interface Example {
   id: string;
   title: string;
@@ -333,5 +404,12 @@ export const EXAMPLES: Example[] = [
     description:
       'Otomatik modda alt seviyede pompa başlar, üst seviyede durur. Alıştırma: alt sensör kuruyken alarm lambası yakın.',
     build: tankSchematic,
+  },
+  {
+    id: 'timer-counter',
+    title: 'Zamanlayıcı ve sayıcı',
+    description:
+      'S1 basışları CTU ile sayılır, sayım sürerken P2 iki TON ile yanıp söner, 3. basıştan 2 s sonra P1 set edilir; S2 reset eder. Alıştırma: P1 yandıktan 5 s sonra kendiliğinden sönsün (TP veya TOF).',
+    build: timerCounterSchematic,
   },
 ];

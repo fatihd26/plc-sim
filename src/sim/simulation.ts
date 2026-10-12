@@ -92,6 +92,9 @@ export type ComponentState =
       piq: boolean[];
       dqTerminals: boolean[];
       trace: LadderTrace;
+      /** Zamanlayıcılar (geçen süre ms) ve sayıcılar (değer), T0.. / C0.. sırasıyla. */
+      timers: { et: number; q: boolean }[];
+      counters: { cv: number; q: boolean }[];
     }
   | {
       type: 'cylinder';
@@ -413,7 +416,7 @@ export class Simulation {
       }
       d.powered = true;
       PLC_DI.forEach((name, i) => (d.plc.diTerminals[i] = nets.potential(e.t[name]!) === 'P24'));
-      if (this.tick % (d.scanTimeMs / TICK_MS) === 0) d.plc.scan();
+      if (this.tick % (d.scanTimeMs / TICK_MS) === 0) d.plc.scan(d.scanTimeMs);
     }
 
     // 3. PLC çıkışları değişmiş olabilir: bobinler ve motorlar güncel netleri görsün
@@ -786,6 +789,8 @@ export class Simulation {
           piq: p.imageCopy('Q').slice(0, PLC_DQ.length),
           dqTerminals: p.dqTerminals.slice(0, PLC_DQ.length),
           trace: structuredClone(p.lastTrace),
+          timers: p.timers(),
+          counters: p.counters(),
         };
       }
       case 'cylinder': {

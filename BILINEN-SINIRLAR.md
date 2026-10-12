@@ -75,8 +75,14 @@
 - [ ] **Kullanıcı kütüphanesi projeye bağlı.** Tanımlar proje dosyasında saklanır. Projeler arası
   ortak kütüphane veya içe aktarma yok. Kullanıcı bileşeninin sembolü kutup türlerinden üretilir,
   serbest çizilemez.
-- [ ] **Ladder komut seti dar.** Yalnız NO/NC kontak ve bobin var. Set/reset, zamanlayıcı ve
-  sayıcı yok.
+- [x] **Ladder komut seti dar.** Komut kütüphanesi eklendi (`src/sim/instructions.ts`): NO/NC,
+  yükselen/düşen kenar (P/N) kontakları, karşılaştırma (==, <>, >, >=, <, <=), bobin, ters bobin,
+  set, reset; TON, TOF, TP, TONR zamanlayıcıları (T0..T15) ve CTU, CTD, CTUD sayıcıları (C0..C15).
+  Komutlar ladder editörünün solundaki ayrı "PLC komutları" menüsünden sürüklenir veya tıklanır
+  (şema kütüphanesinde yer almazlar; çizim alanına bırakılamazlar).
+- [ ] **Sayısal veri işlemleri yok.** MOVE, aritmetik ve %MW kelime belleği yok; karşılaştırma
+  yalnız sabit, zamanlayıcı geçen süresi ve sayıcı değeriyle yapılır. Zamanlayıcı/sayıcı belleği
+  kalıcı değildir (PLC beslemesi kesilince sıfırlanır).
 - [ ] **Kablo yönlendirme sayfa bazında sırayla yapılır.** Önce çizilen kablo en iyi yolu alır.
   Çok yoğun sayfalarda A* yol bulamazsa basit L/Z güzergâhına düşülür. Taşıma sırasında etkilenen
   kablolar basit güzergâhla önizlenir.
