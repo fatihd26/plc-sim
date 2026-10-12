@@ -1,5 +1,6 @@
 import type { ContactType, LadderNode, LadderProgram, Network } from './ladder';
 import { startStopProgram } from './programs';
+import type { ModbusPoll } from './modbusMaster';
 import type { ComponentInstance, Schematic, Wire } from './schematic';
 
 let n = 0;
@@ -141,11 +142,12 @@ function relayLoad(
   output: string,
   load: [string, string],
   supply: [string, string] = ['G1:L+', 'G1:M'],
+  controller = 'A1',
 ): Part {
   return {
     components: [{ id: relay, type: 'relay', name: relay, x, y, rotation: 0 }],
     wires: [
-      w(`A1:${output}`, `${relay}:A1`),
+      w(`${controller}:${output}`, `${relay}:A1`),
       w(`${relay}:A2`, 'G1:M'),
       w(supply[0], `${relay}:13`),
       w(`${relay}:14`, load[0]),
@@ -435,6 +437,78 @@ export function esp32Schematic(): Schematic {
   };
 }
 
+/**
+ * PLC ↔ ESP32 Modbus RTU: A1 (PLC, master) ve A2 (ESP32, slave 1) RS485 ile bağlı.
+ *   - S1 (PLC %I0.0) → %M12.0 → FC15 → ESP32 coil 0 → GPIO18 → K1 → P1
+ *   - S2 (ESP32 GPIO16) → DI0 → FC2 → %M10.0 → PLC %Q0.0 → K2 → P2
+ *   - ESP32 ADC1 → IR0 → FC4 → %MW10; %MW10 > 2047 (5 V) → PLC %Q0.1 → K3 → P3
+ */
+export function modbusSchematic(): Schematic {
+  begin();
+  const program: LadderProgram = {
+    networks: [
+      network('N1', "S1 → ESP32 GPIO18 (coil 0)", contact('%I0.0', 'S1'), '%M12.0', 'ESP32 coil 0'),
+      network('N2', "ESP32 S2 (DI0) → P2", contact('%M10.0', 'ESP32 DI0'), '%Q0.0', 'P2'),
+      network(
+        'N3',
+        'ESP32 ADC 5 V üstünde → P3',
+        { kind: 'compare', id: `cmp${++k}`, op: '>', a: '%MW10', b: '2047', label: 'ESP32 ADC' },
+        '%Q0.1',
+        'P3',
+      ),
+    ],
+  };
+  const modbusPolls: ModbusPoll[] = [
+    { id: 'p1', unit: 1, fn: 2, remote: 0, qty: 2, local: '%M10.0', periodMs: 50 },
+    { id: 'p2', unit: 1, fn: 4, remote: 0, qty: 1, local: '%MW10', periodMs: 100 },
+    { id: 'p3', unit: 1, fn: 15, remote: 0, qty: 2, local: '%M12.0', periodMs: 50 },
+  ];
+  return {
+    version: 2,
+    title: 'PLC ↔ ESP32 Modbus RTU',
+    pages: [{ id: 'p1', title: 'Kumanda ve RS485' }],
+    ...merge(
+      relayLoad('K2', 20, 440, 'Q0.0', ['P2:X1', 'P2:X2']),
+      relayLoad('K3', 160, 440, 'Q0.1', ['P3:X1', 'P3:X2']),
+      relayLoad('K1', 400, 440, 'GPIO18', ['P1:X1', 'P1:X2'], ['G1:L+', 'G1:M'], 'A2'),
+      {
+        components: [
+          { id: 'G1', type: 'psu24', name: 'G1', x: 40, y: 20, rotation: 0 },
+          { id: 'S1', type: 'buttonNO', name: 'S1', x: 140, y: 140, rotation: 0 },
+          { id: 'S2', type: 'buttonNO', name: 'S2', x: 540, y: 140, rotation: 0 },
+          {
+            id: 'A1',
+            type: 'plc',
+            name: 'A1',
+            x: 40,
+            y: 280,
+            rotation: 0,
+            program,
+            modbusPolls,
+          },
+          { id: 'A2', type: 'esp32', name: 'A2', x: 420, y: 280, rotation: 0, params: { firmware: 'modbusSlave' } },
+          { id: 'P2', type: 'lamp', name: 'P2', x: 20, y: 580, rotation: 0, params: { color: 'green' } },
+          { id: 'P3', type: 'lamp', name: 'P3', x: 160, y: 580, rotation: 0, params: { color: 'yellow' } },
+          { id: 'P1', type: 'lamp', name: 'P1', x: 400, y: 580, rotation: 0, params: { color: 'white' } },
+        ],
+        wires: [
+          w('G1:L+', 'A1:L+'),
+          w('G1:M', 'A1:M'),
+          w('G1:L+', 'A2:24V'),
+          w('G1:M', 'A2:GND'),
+          w('G1:L+', 'S1:13'),
+          w('S1:14', 'A1:I0.0'),
+          w('G1:L+', 'S2:13'),
+          w('S2:14', 'A2:GPIO16'),
+          // RS485: A-A, B-B
+          w('A1:RS485_A', 'A2:RS485_A'),
+          w('A1:RS485_B', 'A2:RS485_B'),
+        ],
+      },
+    ),
+  };
+}
+
 export interface Example {
   id: string;
   title: string;
@@ -492,5 +566,12 @@ export const EXAMPLES: Example[] = [
     description:
       'ESP32 ladder ile programlanır: S1 (GPIO16) bırakıldıktan 2 s sonra P1 söner (TOF), ADC1 5 V üstünde P2 yanar. Programı alt panelden düzenleyin, ADC1\'i Özellikler panelindeki kaydırıcıyla değiştirin. Alıştırma: GPIO17\'ye ikinci bir buton bağlayıp P1\'i sayıcıyla 3 basışta yakın.',
     build: esp32Schematic,
+  },
+  {
+    id: 'modbus',
+    title: 'PLC ↔ ESP32 Modbus RTU',
+    description:
+      'PLC master, ESP32 slave: S1 (PLC) ESP32\'nin P1 lambasını, S2 (ESP32) PLC\'nin P2 lambasını yakar; ESP32 ADC değeri %MW10\'a okunur. Modbus tablosunu PLC programı panelindeki "Modbus" düğmesinden açın. Alıştırma: RS485 A/B kablolarını ters bağlayın ve zaman aşımını gözleyin.',
+    build: modbusSchematic,
   },
 ];

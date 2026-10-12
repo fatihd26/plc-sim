@@ -36,6 +36,9 @@ import type { ParamValue } from '../sim/catalog';
 import { controllerIo } from '../sim/ioConfig';
 import type { ComponentInstance } from '../sim/schematic';
 import type { SymbolTable } from '../sim/symbolTable';
+import type { ModbusPoll } from '../sim/modbusMaster';
+import { strParam } from '../sim/catalog';
+import { ModbusPanel } from './ModbusPanel';
 import { IoConfigPanel, IoContext, IoDatalist, IoHint, type IoInfo } from './IoConfigPanel';
 import { formatMs, LadderView } from './LadderView';
 
@@ -49,6 +52,8 @@ interface Props {
   controller?: ComponentInstance;
   /** Kontrolör parametrelerini değiştirir (ESP32 pin yönü/adresi). */
   onParams?(params: Record<string, ParamValue>): void;
+  /** Yalnız PLC: Modbus master tablosu. */
+  onPolls?(polls: ModbusPoll[]): void;
 }
 
 type Check = { ok: string } | { error: string };
@@ -70,7 +75,8 @@ const CONTACT_OPTIONS: { value: ContactType; label: string }[] = [
 
 const OUTPUT_OPTIONS = INSTRUCTIONS.filter((i) => i.action.kind === 'output');
 
-export function LadderEditor({ program, symbols, onChange, selected: sel, onSelect: select, controller, onParams }: Props) {
+export function LadderEditor({ program, symbols, onChange, selected: sel, onSelect: select, controller, onParams, onPolls }: Props) {
+  const [showModbus, setShowModbus] = useState(false);
   const [parallelMode, setParallelMode] = useState(false);
   const [showIo, setShowIo] = useState(false);
   // Eleman seçilince G/Ç paneli kapanır, özellik formu açılır.
@@ -171,11 +177,31 @@ export function LadderEditor({ program, symbols, onChange, selected: sel, onSele
             >
               ⚙ G/Ç eşlemesi{io?.errors.length ? ' ⚠' : ''}
             </button>
+            {controller.type === 'plc' && onPolls && (
+              <button
+                type="button"
+                className={showModbus ? 'active' : undefined}
+                aria-pressed={showModbus}
+                title="RS485 Modbus RTU master tarama tablosu"
+                onClick={() => setShowModbus((v) => !v)}
+              >
+                ⇄ Modbus{controller.modbusPolls?.length ? ` (${controller.modbusPolls.length})` : ''}
+              </button>
+            )}
           </>
         )}
       </div>
       <div className={`ladder-edit-body with-palette${showIo ? ' io-open' : ''}`}>
         <InstructionPalette onPick={insert} parallel={parallelMode} onParallel={setParallelMode} />
+        {showModbus && controller?.type === 'plc' && onPolls ? (
+          <ModbusPanel
+            polls={controller.modbusPolls ?? []}
+            baud={strParam(controller, 'baud')}
+            onChange={onPolls}
+            onClose={() => setShowModbus(false)}
+          />
+        ) : (
+        <>
         <div className="ladder-canvas">
           <LadderView
             networks={program.networks}
@@ -257,6 +283,8 @@ export function LadderEditor({ program, symbols, onChange, selected: sel, onSele
             </p>
           )}
         </div>
+        </>
+        )}
       </div>
     </div>
     </IoContext.Provider>

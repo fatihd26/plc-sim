@@ -217,6 +217,13 @@ export class ModbusRtuBus {
     return id;
   }
 
+  /** Kuyruğu, süren işlemi ve bekleyen sonuçları siler (ör. master'ın beslemesi kesildi). */
+  clear(): void {
+    this.queue.length = 0;
+    this.current = null;
+    this.done.clear();
+  }
+
   get busy(): boolean {
     return this.current !== null || this.queue.length > 0;
   }

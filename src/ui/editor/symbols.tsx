@@ -298,6 +298,9 @@ export function SymbolBody({ inst, state, xrefText }: BodyProps): ReactNode {
           <text x={136} y={53} className="sym-text">
             PLC
           </text>
+          <text x={208} y={50} className="sym-text tiny">
+            485
+          </text>
         </g>
       );
     }

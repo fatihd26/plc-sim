@@ -1,5 +1,6 @@
 // Editör dokümanı: şema + seçim + geri al/yinele geçmişi. Saf reducer, React'tan bağımsız.
 
+import type { ModbusPoll } from '../../sim/modbusMaster';
 import { isController } from '../../sim/ioConfig';
 import { CATALOG, prefixOf, terminalsOf, type ComponentType, type CustomDef, type ParamValue } from '../../sim/catalog';
 import type { LadderProgram } from '../../sim/ladder';
@@ -55,6 +56,7 @@ export type EditorAction =
   /** Birden çok parametre tek geri alma adımında (ör. G/Ç otomatik yapılandırma). */
   | { type: 'setParams'; id: string; params: Record<string, ParamValue> }
   | { type: 'setProgram'; id: string; program: LadderProgram }
+  | { type: 'setPolls'; id: string; polls: ModbusPoll[] }
   /** points: kablo çizilirken tıklanan ara noktalar (elle güzergâh). */
   | { type: 'connect'; a: TerminalRef; b: TerminalRef; points?: Point[] }
   /** Kablonun ortasına bağlanma: (x, y)'de bağlantı noktası oluşturur, kabloyu böler. */
@@ -212,6 +214,11 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         state,
         updateComponent(s, action.id, (c) => ({ ...c, params: { ...c.params, ...Object.fromEntries(known) } })),
       );
+    }
+    case 'setPolls': {
+      const c = s.components.find((c) => c.id === action.id);
+      if (!c || c.type !== 'plc' || c.modbusPolls === action.polls) return state;
+      return commit(state, updateComponent(s, action.id, (c) => ({ ...c, modbusPolls: action.polls })));
     }
     case 'setProgram': {
       const c = s.components.find((c) => c.id === action.id);

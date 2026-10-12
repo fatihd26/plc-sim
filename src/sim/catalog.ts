@@ -295,9 +295,19 @@ export const CATALOG: Record<ComponentType, ComponentSpec> = {
     title: 'PLC (8 DI / 8 DQ)',
     prefix: 'A',
     category: 'Kontrol',
-    description: '24 V DC giriş/çıkış, ladder programı PLC panelinden düzenlenir',
-    terminals: ['L+', 'M', ...PLC_DI, ...PLC_DQ],
-    params: [num('scanTimeMs', 'Scan süresi', 10, 1, 100, 1, 'ms')],
+    description: '24 V DC giriş/çıkış, RS485 Modbus RTU master; ladder programı ve Modbus tablosu alt panelden düzenlenir',
+    terminals: ['L+', 'M', ...PLC_DI, ...PLC_DQ, 'RS485_A', 'RS485_B'],
+    params: [
+      num('scanTimeMs', 'Scan süresi', 10, 1, 100, 1, 'ms'),
+      {
+        key: 'baud',
+        label: 'RS485 baud hızı',
+        kind: 'enum',
+        default: '19200',
+        options: ['9600', '19200', '38400', '115200'].map((v) => ({ value: v, label: `${v} bit/s` })),
+      },
+      num('timeoutMs', 'Modbus zaman aşımı', 200, 10, 5000, 10, 'ms'),
+    ],
   },
   esp32: {
     type: 'esp32',

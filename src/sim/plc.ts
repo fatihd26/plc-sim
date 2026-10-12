@@ -73,6 +73,20 @@ export class Plc {
     return this.image[addr.area][bitIndex(addr)]!;
   }
 
+  /** Alan içi düz indeksle bit okur (Modbus master için). */
+  readBitAt(area: Area, index: number): boolean {
+    return this.image[area][index] ?? false;
+  }
+
+  /** Alan içi düz indeksle bit yazar (Modbus master için). */
+  writeBitAt(area: Area, index: number, value: boolean): void {
+    if (index >= 0 && index < this.image[area].length) this.image[area][index] = value;
+  }
+
+  getWord(index: number): number {
+    return this.runtime.words[index] ?? 0;
+  }
+
   private writeBit(addr: BitAddress, value: boolean): void {
     this.image[addr.area][bitIndex(addr)] = value;
   }

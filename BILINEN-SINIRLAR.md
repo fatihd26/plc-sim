@@ -82,10 +82,11 @@
   (şema kütüphanesinde yer almazlar; çizim alanına bırakılamazlar).
 - [ ] **Sayısal veri işlemleri yok.** %MW0..%MW63 kelime belleği var ve karşılaştırmada
   okunabilir, Modbus holding register'larıyla yazılabilir; ama ladder'da MOVE ve aritmetik yok.
-- [ ] **Modbus master yok.** ESP32 I/O kartı Modbus slave olarak çalışır ve RS485 kablolamasından
-  bus üyeliği / A-B ters bağlantı bulunur; ama bus üzerinde istek gönderen bir master (PLC tarama
-  tablosu) henüz yok. ESP32 coil'leri şimdilik Özellikler panelindeki test master'ıyla yazılır.
-  Gerçek cihaz köprüsü (HIL) yok. ESP32 ADC değeri şemadan değil, panelden ayarlanır (mantıksal
+- [x] **Modbus master yok.** PLC, tarama tablosuyla RS485 üzerinden Modbus RTU master olarak
+  çalışır (`sim/modbusMaster.ts`).
+- [ ] **Modbus kapsamı.** Yalnız ESP32 slave olabilir (PLC'ler arası Modbus yok), yalnız PLC
+  master olabilir. Modbus TCP ve gerçek cihaz köprüsü (HIL) yok. Satırlar periyodik çalışır;
+  ladder'dan tetiklenen istek komutu yok. ESP32 ADC değeri şemadan değil, panelden ayarlanır (mantıksal
   çözücü gerilim taşımaz). Zamanlayıcı/sayıcı belleği
   kalıcı değildir (PLC beslemesi kesilince sıfırlanır).
 - [ ] **Kablo yönlendirme sayfa bazında sırayla yapılır.** Önce çizilen kablo en iyi yolu alır.

@@ -29,6 +29,7 @@ import { PropertiesPanel } from './editor/PropertiesPanel';
 import { IoTable } from './IoTable';
 import { LadderEditor } from './LadderEditor';
 import { LadderView } from './LadderView';
+import { ModbusStatusTable } from './ModbusPanel';
 import { downloadSchematic, FILE_EXTENSION, loadAutosave, parseSchematic, saveAutosave } from './project';
 import { useSimulation } from './useSimulation';
 
@@ -457,6 +458,7 @@ export function App() {
                   onSelect={setLadderSel}
                   controller={plc}
                   onParams={(params) => dispatch({ type: 'setParams', id: plc.id, params })}
+                  onPolls={(polls) => dispatch({ type: 'setPolls', id: plc.id, polls })}
                 />
                 </>
               ) : plcState ? (
@@ -466,6 +468,9 @@ export function App() {
                   </div>
                   <div className="io-pane">
                     <IoTable plc={plcState} io={io} symbols={symbols} program={program} />
+                    {ctrlState?.type === 'plc' && plc.modbusPolls?.length ? (
+                      <ModbusStatusTable polls={plc.modbusPolls} status={ctrlState.modbus} />
+                    ) : null}
                   </div>
                 </div>
               ) : (

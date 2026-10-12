@@ -17,6 +17,7 @@ import { Contactor, Conveyor, Cylinder, Motor, PushButton, Tank, ThermalRelay } 
 import type { LadderProgram, LadderTrace } from './ladder';
 import { NetSolver, type NetPotential, type NetResult, type Potential } from './netlist';
 import { controllerIo } from './ioConfig';
+import { ModbusMaster, type PollStatus } from './modbusMaster';
 import { Plc } from './plc';
 import { startStopProgram } from './programs';
 import { terminalKey, validateSchematic, type ComponentInstance, type Schematic } from './schematic';
@@ -87,7 +88,7 @@ export type ComponentState =
       angleDeg: number;
       direction: 1 | -1;
     }
-  | ({ type: 'plc' } & PlcRuntimeState)
+  | ({ type: 'plc'; /** Modbus tablosu satırlarının durumu (tablo yoksa boş). */ modbus: PollStatus[] } & PlcRuntimeState)
   | {
       type: 'esp32';
       powered: boolean;
@@ -219,7 +220,7 @@ type Device =
   | { type: 'lamp'; lit: boolean; voltage: Voltage; fault: string | null }
   | { type: 'thermal'; relay: ThermalRelay; currentA: number }
   | { type: 'motor3'; motor: Motor }
-  | { type: 'plc'; plc: Plc; powered: boolean; scanTimeMs: number }
+  | { type: 'plc'; plc: Plc; powered: boolean; scanTimeMs: number; master: ModbusMaster | null }
   | { type: 'esp32'; esp: Esp32; adcMv: number }
   | { type: 'cylinder'; cylinder: Cylinder; voltage: Voltage; fault: string | null }
   | { type: 'conveyor'; motor: Motor; conveyor: Conveyor }
@@ -340,6 +341,9 @@ function createDevice(c: ComponentInstance, config: SimConfig): Device {
         plc: new Plc(config.program ?? c.program ?? startStopProgram),
         powered: false,
         scanTimeMs: config.scanTimeMs ?? Math.round(numParam(c, 'scanTimeMs')),
+        master: c.modbusPolls?.length
+          ? new ModbusMaster(c.modbusPolls, Number(strParam(c, 'baud')), numParam(c, 'timeoutMs'))
+          : null,
       };
     case 'esp32': {
       const modes = Object.fromEntries(ESP32_GPIO.map((p) => [p, strParam(c, `mode_${p}`) as PinMode])) as Record<
@@ -507,6 +511,7 @@ export class Simulation {
       ) as Record<Esp32Pin, boolean>;
       d.esp.update({ powered, pins, adcMv: d.adcMv }, TICK_MS);
     }
+    this.stepModbus(nets);
 
     // 3. PLC çıkışları değişmiş olabilir: bobinler ve motorlar güncel netleri görsün
     nets = this.protect(this.solveNets());
@@ -934,7 +939,11 @@ export class Simulation {
         };
       }
       case 'plc':
-        return { type: d.type, ...plcRuntimeState(d.plc, d.powered, d.scanTimeMs, Math.max(PLC_DI.length, PLC_DQ.length)) };
+        return {
+          type: d.type,
+          ...plcRuntimeState(d.plc, d.powered, d.scanTimeMs, Math.max(PLC_DI.length, PLC_DQ.length)),
+          modbus: d.master ? [...d.master.status.values()].map((s) => ({ ...s, values: [...s.values] })) : [],
+        };
       case 'cylinder': {
         const c = d.cylinder;
         return {
@@ -998,11 +1007,50 @@ export class Simulation {
     }
   }
 
+  /** RS485 uçları olan cihazlar (PLC, ESP32) ve A/B netleri. */
+  private rs485Nodes(nets: NetResult) {
+    return this.entries
+      .filter((e) => e.device.type === 'esp32' || e.device.type === 'plc')
+      .map((e) => ({ id: e.id, name: e.name, entry: e, a: nets.netOf(e.t['RS485_A']!), b: nets.netOf(e.t['RS485_B']!) }));
+  }
+
+  /**
+   * Modbus master'ları ilerletir. Bus, RS485 kablolamasından bulunur: master'ın A/B netlerini
+   * paylaşan, enerjili ve aynı baud hızındaki ESP32'ler slave'dir. A/B ters bağlı veya baud'u
+   * farklı slave yanıt vermez (zaman aşımı). Aynı bus'ta iki master veya köprülenmiş A/B,
+   * bus hatasıdır.
+   */
+  private stepModbus(nets: NetResult): void {
+    const masters = this.entries.filter(
+      (e): e is Entry & { device: Extract<Device, { type: 'plc' }> } => e.device.type === 'plc' && e.device.master !== null,
+    );
+    if (!masters.length) return;
+    const nodes = this.rs485Nodes(nets);
+    const { groups } = rs485Groups(nodes);
+    for (const e of masters) {
+      const d = e.device;
+      const master = d.master!;
+      if (!d.powered) {
+        master.reset();
+        continue;
+      }
+      const node = nodes.find((n) => n.id === e.id)!;
+      const group = groups.find((g) => g.includes(node)) ?? [];
+      const otherMaster = group.find((n) => n !== node && n.entry.device.type === 'plc' && n.entry.device.master);
+      const fault =
+        node.a === node.b ? 'RS485 A ve B köprülenmiş' : otherMaster ? `bus'ta birden çok master (${otherMaster.name})` : null;
+      const slaves = group.flatMap((n) => {
+        const dev = n.entry.device;
+        if (dev.type !== 'esp32' || !dev.esp.inputs.powered || dev.esp.params.baud !== master.baud) return [];
+        return [{ unit: dev.esp.params.slaveId, model: dev.esp.regs }];
+      });
+      master.step(this.tick, d.plc, fault ? null : slaves, fault);
+    }
+  }
+
   /** RS485 kablolamasından bus üyeliklerini ve kablolama hatalarını ESP32 durumlarına yazar. */
   private annotateRs485(nets: NetResult, components: Record<string, ComponentState>): void {
-    const nodes = this.entries
-      .filter((e) => e.device.type === 'esp32')
-      .map((e) => ({ id: e.id, name: e.name, a: nets.netOf(e.t['RS485_A']!), b: nets.netOf(e.t['RS485_B']!) }));
+    const nodes = this.rs485Nodes(nets);
     const { groups, swapped } = rs485Groups(nodes);
     for (const n of nodes) {
       const st = components[n.id];

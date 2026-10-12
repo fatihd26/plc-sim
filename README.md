@@ -53,7 +53,7 @@ npm run build      # tip kontrolü + üretim derlemesi
 | Koruma | Motor koruma şalteri – termik + manyetik açma (Q), otomatik sigorta 1P (F), termik röle (F) |
 | Tüketiciler | Asenkron motor 3~, yük oranı ayarlı (M) |
 | Sinyal | Sinyal lambası 24 V DC / 230 V AC (P) |
-| Kontrol | PLC 8 DI / 8 DQ, kendi ladder programıyla (A); ESP32 I/O kartı: 4 GPIO (24 V, giriş/çıkış seçilir), ADC1 0–10 V, RS485 Modbus slave; ladder ile programlanır (A) |
+| Kontrol | PLC 8 DI / 8 DQ, kendi ladder programıyla, RS485 Modbus RTU master (A); ESP32 I/O kartı: 4 GPIO (24 V, giriş/çıkış seçilir), ADC1 0–10 V, RS485 Modbus slave; ladder ile programlanır (A) |
 | Bağlantı | Klemens (X), bağlantı noktası (J), sayfa geçişi (XR) |
 | Kullanıcı | Kutup türlerinden tanımlanan bileşenler (proje dosyasında saklanır) |
 
@@ -74,6 +74,15 @@ adresin hangi pine gittiği (ya da hiçbir pine bağlı olmadığı) gösterilir
 `%MW0`'a (ham, 0..4095 = 0..10 V) ve `%MW1`'e (mV) yazılır. Modbus slave görünümü: coil ↔ `%Q`,
 discrete input ↔ `%I`, holding register ↔ `%MW`, IR0/IR1 = ADC. Scan periyodu "Firmware döngüsü"
 ayarıdır.
+
+**Modbus RTU.** PLC'nin RS485_A/B uçları, ESP32'lerin RS485 uçlarıyla A-A, B-B bağlanır. PLC
+programı panelindeki "⇄ Modbus" düğmesi master tarama tablosunu açar. Her satırda slave adresi,
+işlev (FC1–6, 15, 16), uzak adres, adet, PLC adresi ve periyot bulunur. Okumada değer PLC'ye
+yazılır (bit → `%M`, register → `%MW`), yazmada PLC'den alınır (bit ← `%I/%Q/%M`, register ←
+`%MW`). Bus kablolamadan bulunur; çerçeve süreleri baud hızına göre hesaplanır. A/B ters
+bağlı, enerjisiz, adresi veya baud'u farklı slave yanıt vermez (zaman aşımı). Aynı bus'ta iki
+master veya köprülenmiş A/B bus hatasıdır. Simülasyonda satır durumları I/O tablosunun altında
+görünür. Örnek: "PLC ↔ ESP32 Modbus RTU".
 
 **PLC çıkışı yük beslemez.** %Q çıkışları yalnız bobin (röle, kontaktör) sürer. Lamba, fan,
 valf gibi bir yük PLC veya ESP32 çıkış netine bağlanırsa simülasyonda çalışmaz ve "PLC çıkışından doğrudan
@@ -98,6 +107,8 @@ src/sim/   Simülasyon çekirdeği (saf TS; React/DOM/Math.random/Date.now yasak
   symbolTable.ts  PLC adresi → kablolamadan bulunan şema elemanı
   plc.ts          Terminaller, process image (PII/PIQ/M), scan(); Modbus slave görünümü
   esp32.ts        ESP32 I/O kartı: firmware (ladder / Modbus slave / yerel), GPIO, ADC, RS485 bus bulma
+  modbusMaster.ts PLC Modbus master: tarama tablosu, doğrulama, periyodik istek, sonuçları %M/%MW'ye yazma
+  ioConfig.ts     Kontrolör G/Ç eşlemesi (PLC sabit, ESP32 pin yönü/adresi), programdan otomatik yapılandırma
   modbus.ts       Modbus veri modeli, istek işleyici (FC1-6, 15, 16), RTU çerçeve/CRC, sanal RS485 bus
   devices.ts      PushButton, Contactor, ThermalRelay, Motor
   catalog.ts      Bileşen kütüphanesi: tip, kategori, terminaller, parametreler, kullanıcı tanımları

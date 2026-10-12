@@ -179,6 +179,19 @@ button.link { border: none; background: none; padding: 0; color: var(--accent); 
 .io-map select { font-size: 11px; padding: 1px 2px; }
 .io-map tr.used td { font-weight: 600; }
 .ladder-toolbar button.active { background: var(--accent-soft); border-color: var(--accent); }
+.modbus-panel { grid-column: 2 / -1; overflow: auto; padding: 8px 12px; }
+.modbus-panel header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; flex-wrap: wrap; }
+.modbus-panel header .icon { margin-left: auto; }
+.modbus-table { border-collapse: collapse; font-size: 12px; }
+.modbus-table th { text-align: left; font-weight: 600; color: var(--muted); padding: 2px 4px; }
+.modbus-table td { padding: 2px 4px; }
+.modbus-table input { width: 70px; font-size: 12px; }
+.modbus-table input.mono:not([type]) { width: 80px; }
+.modbus-table select { font-size: 12px; }
+.modbus-table tr.invalid td { background: color-mix(in srgb, var(--fault) 10%, transparent); }
+.modbus-status { margin-top: 10px; }
+.mb-state.ok { color: var(--on); font-weight: 600; }
+.mb-state.timeout, .mb-state.exception, .mb-state.busFault, .mb-state.invalid { color: var(--fault); font-weight: 600; }
 .count {
   font-size: 10px; font-weight: 600; color: var(--muted); background: var(--bg);
   border-radius: 8px; padding: 0 6px; margin-left: auto;
@@ -552,6 +565,7 @@ ul.xref-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 4px;
   .dock-title { border-radius: 12px 12px 0 0; }
   .bottom-body, .ladder-edit-body, .ladder-edit-body.with-palette, .ladder-edit-body.with-palette.io-open { grid-template-columns: minmax(0, 1fr); }
   .instr-palette { border-right: none; border-bottom: 1px solid var(--border); max-height: 180px; }
+  .modbus-panel { grid-column: auto; }
   .io-pane, .ladder-inspector { border-left: none; border-top: 1px solid var(--border); }
 
   .titlebar { gap: 10px; padding: 6px 10px; }

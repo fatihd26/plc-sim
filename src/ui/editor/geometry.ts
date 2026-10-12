@@ -125,6 +125,8 @@ export const GEOMETRY: Record<BuiltinType, SymbolGeo> = {
       top('M', 40),
       ...PLC_DI.map((n, i) => top(n, 60 + i * 20)),
       ...PLC_DQ.map((n, i) => bottom(n, 60 + i * 20, 100)),
+      { name: 'RS485_A', x: 220, y: 40, dir: 'right' },
+      { name: 'RS485_B', x: 220, y: 60, dir: 'right' },
     ],
   },
 };

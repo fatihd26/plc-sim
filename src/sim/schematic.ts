@@ -2,6 +2,7 @@
 // Konum/döndürme/sayfa/büküm noktaları çizim içindir; çekirdek yalnızca tip, kimlik, parametre
 // ve bağlantıları kullanır.
 
+import { validatePoll, type ModbusPoll } from './modbusMaster';
 import { controllerIo } from './ioConfig';
 import {
   CATALOG,
@@ -32,8 +33,10 @@ export interface ComponentInstance {
   page?: string;
   /** Kataloğun tanımladığı parametreler; eksik olanlar varsayılan değeri alır. */
   params?: Record<string, ParamValue>;
-  /** Yalnız PLC: yüklü ladder programı (yoksa start-stop örnek programı). */
+  /** Yalnız PLC/ESP32: yüklü ladder programı (PLC'de yoksa start-stop örnek programı). */
   program?: LadderProgram;
+  /** Yalnız PLC: Modbus RTU master tarama tablosu. */
+  modbusPolls?: ModbusPoll[];
   /** Yalnız `custom`: bileşenin tanımı (kütüphanedeki tanımın kopyası). */
   custom?: CustomDef;
 }
@@ -127,6 +130,16 @@ export function validateSchematic(s: Schematic): string[] {
       if (!CATALOG[c.type].params.some((p) => p.key === key)) errors.push(`${c.name}: bilinmeyen parametre "${key}"`);
     }
     for (const e of controllerIo(c).errors) errors.push(`${c.name} G/Ç: ${e}`);
+    if (c.modbusPolls) {
+      if (c.type !== 'plc') errors.push(`${c.name}: Modbus tablosu yalnız PLC'de olabilir`);
+      const ids = new Set<string>();
+      for (const p of c.modbusPolls) {
+        if (ids.has(p.id)) errors.push(`${c.name} Modbus: tekrarlanan satır kimliği "${p.id}"`);
+        ids.add(p.id);
+        const err = validatePoll(p);
+        if (err) errors.push(`${c.name} Modbus satırı ${p.id}: ${err}`);
+      }
+    }
     if (c.program) {
       try {
         compileProgram(c.program);
