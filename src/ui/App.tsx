@@ -3,7 +3,8 @@
 // iki mod vardır.
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
-import { EXAMPLES, type Example } from '../sim/examples';
+import { EXAMPLES as BASE_EXAMPLES, type Example } from '../sim/examples';
+import { TASK_EXAMPLES } from '../sim/tasks';
 import type { LadderProgram } from '../sim/ladder';
 import { startStopProgram } from '../sim/programs';
 import { emptySchematic, pagesOf, pageOf, type Schematic } from '../sim/schematic';
@@ -32,6 +33,9 @@ import { LadderView } from './LadderView';
 import { ModbusStatusTable } from './ModbusPanel';
 import { downloadSchematic, FILE_EXTENSION, loadAutosave, parseSchematic, saveAutosave } from './project';
 import { useSimulation } from './useSimulation';
+import { TaskPanel } from './TaskPanel';
+import { TrendPanel } from './TrendPanel';
+import { viewOf } from './devices';
 
 type Mode = 'edit' | 'sim';
 
@@ -53,6 +57,8 @@ function useMediaQuery(query: string) {
   return match;
 }
 
+const EXAMPLES: Example[] = [...BASE_EXAMPLES, ...TASK_EXAMPLES];
+
 const isTyping = (t: EventTarget | null) =>
   t instanceof HTMLElement && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT' || t.isContentEditable);
 
@@ -73,6 +79,8 @@ export function App() {
   const [message, setMessage] = useState<string | null>(null);
   const [pageState, setPage] = useState<string>(() => pagesOf(schematic)[0]!.id);
   const [plcChoice, setPlcChoice] = useState<string | null>(null);
+  const [bottomTab, setBottomTab] = useState<'plc' | 'trend' | 'task'>('plc');
+  const [trendKeys, setTrendKeys] = useState<string[]>([]);
   const clipboard = useRef<{ clip: Clipboard; pastes: number } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -107,6 +115,8 @@ export function App() {
       dispatch({ type: 'load', schematic: next });
       setPage(pagesOf(next)[0]!.id);
       setPlcChoice(null);
+      setTrendKeys([]);
+      setBottomTab(next.task ? 'task' : 'plc');
       setMessage(note);
       fit();
     },
@@ -141,6 +151,8 @@ export function App() {
     for (const [id, st] of Object.entries(snapshot?.components ?? {})) {
       if (st.type === 'buttonNO' || st.type === 'buttonNC' || st.type === 'estop' || st.type === 'custom') {
         held[id] = st.pressed;
+      } else if ('pressed' in st && typeof st.pressed === 'boolean') {
+        held[id] = st.pressed;
       }
     }
     return held;
@@ -155,7 +167,10 @@ export function App() {
       const st = snapshot?.components[component];
       if (st?.type === 'estop') sim.send({ type: 'button', component, pressed: !st.pressed });
       else if (st?.type === 'breaker3' || st?.type === 'fuse') sim.send({ type: 'switch', component, closed: !st.closed });
-      else if (st?.type === 'conveyor') sim.send({ type: 'addBox', component });
+      else if (st) {
+        const click = viewOf(st.type)?.click;
+        if (click && click !== 'hold') sim.send({ type: 'device', component, action: click.action, value: click.value?.(st) });
+      }
     },
     [snapshot, sim.send],
   );
@@ -290,7 +305,7 @@ export function App() {
           <span className="logo" aria-hidden>
             ⏚
           </span>
-          PLC-SIM <span className="version">v0.3</span>
+          PLC-SIM <span className="version">v0.4</span>
         </div>
         <nav className="mode-tabs" role="tablist" aria-label="Çalışma modu">
           <button type="button" role="tab" aria-selected={edit} className={edit ? 'active' : ''} onClick={() => setMode('edit')}>
@@ -420,8 +435,18 @@ export function App() {
           {plcOpen && (
             <section className="bottom-dock">
               <header className="dock-title">
-                {edit ? 'Program (PLC / ESP32)' : 'Online izleme ve I/O'}
-                {plcs.length > 0 && (
+                <nav className="dock-tabs" aria-label="Alt panel">
+                  <button type="button" className={bottomTab === 'plc' ? 'active' : ''} onClick={() => setBottomTab('plc')}>
+                    {edit ? 'Program' : 'Online izleme'}
+                  </button>
+                  <button type="button" className={bottomTab === 'trend' ? 'active' : ''} onClick={() => setBottomTab('trend')}>
+                    Trend
+                  </button>
+                  <button type="button" className={bottomTab === 'task' ? 'active' : ''} onClick={() => setBottomTab('task')}>
+                    Görev{schematic.task ? ' •' : ''}
+                  </button>
+                </nav>
+                {bottomTab === 'plc' && plcs.length > 0 && (
                   <select
                     className="plc-select"
                     aria-label="İzlenen kontrolör"
@@ -439,7 +464,11 @@ export function App() {
                   ✕
                 </button>
               </header>
-              {!plc ? (
+              {bottomTab === 'trend' ? (
+                <TrendPanel schematic={schematic} snapshot={snapshot} selected={trendKeys} onSelected={setTrendKeys} />
+              ) : bottomTab === 'task' ? (
+                <TaskPanel schematic={schematic} edit={edit} dispatch={dispatch} />
+              ) : !plc ? (
                 <p className="dock-note">Şemada PLC veya ESP32 yok. Kütüphaneden bir PLC ya da ESP32 I/O kartı ekleyin.</p>
               ) : edit ? (
                 <>
@@ -652,8 +681,9 @@ function ExamplesMenu({ disabled, onPick }: { disabled: boolean; onPick(e: Examp
         <>
           <div className="menu-backdrop" onClick={() => setAt(null)} />
           <ul className="menu" role="menu" style={{ left: at.x, top: at.y }}>
-            {EXAMPLES.map((e) => (
+            {EXAMPLES.map((e, i) => (
               <li key={e.id} role="none">
+                {(i === 0 || EXAMPLES[i - 1]!.group !== e.group) && <div className="menu-group">{e.group}</div>}
                 <button
                   type="button"
                   role="menuitem"

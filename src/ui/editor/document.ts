@@ -2,7 +2,7 @@
 
 import type { ModbusPoll } from '../../sim/modbusMaster';
 import { isController } from '../../sim/ioConfig';
-import { CATALOG, prefixOf, terminalsOf, type ComponentType, type CustomDef, type ParamValue } from '../../sim/catalog';
+import { CATALOG, prefixOf, terminalDomain, terminalsOf, type ComponentType, type CustomDef, type ParamValue } from '../../sim/catalog';
 import type { LadderProgram } from '../../sim/ladder';
 import {
   pageOf,
@@ -12,6 +12,7 @@ import {
   type Point,
   type Rotation,
   type Schematic,
+  type Task,
   type TerminalRef,
   type Wire,
 } from '../../sim/schematic';
@@ -69,6 +70,11 @@ export type EditorAction =
   | { type: 'renamePage'; id: string; title: string }
   | { type: 'deletePage'; id: string }
   | { type: 'setTitle'; title: string }
+  /** Simülasyon başında etkin arızalar (arıza bulma alıştırması). */
+  | { type: 'setFaults'; id: string; faults: string[] }
+  | { type: 'setWireBroken'; id: string; broken: boolean }
+  | { type: 'setHideFaults'; hide: boolean }
+  | { type: 'setTask'; task: Task | undefined }
   | { type: 'defineCustom'; def: CustomDef }
   | { type: 'deleteCustom'; id: string }
   | { type: 'load'; schematic: Schematic }
@@ -227,7 +233,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     }
     case 'connect': {
       const { a, b } = action;
-      if (sameTerminal(a, b)) return state;
+      if (sameTerminal(a, b) || !sameDomain(s, a, b)) return state;
       const exists = s.wires.some(
         (w) => (sameTerminal(w.a, a) && sameTerminal(w.b, b)) || (sameTerminal(w.a, b) && sameTerminal(w.b, a)),
       );
@@ -239,7 +245,7 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
     case 'connectToWire': {
       const w = s.wires.find((w) => w.id === action.wire);
       if (!w) return state;
-      if (sameTerminal(w.a, action.from) || sameTerminal(w.b, action.from)) return state;
+      if (sameTerminal(w.a, action.from) || sameTerminal(w.b, action.from) || !sameDomain(s, w.a, action.from)) return state;
       const host = s.components.find((c) => c.id === w.a.component);
       const page = host ? pageOf(s, host) : pagesOf(s)[0]!.id;
       const g = geometryOf({ type: 'junction' });
@@ -359,6 +365,41 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
         EMPTY_SELECTION,
       );
     }
+    case 'setFaults': {
+      const c = s.components.find((c) => c.id === action.id);
+      if (!c) return state;
+      const faults = [...new Set(action.faults)];
+      if ((c.faults ?? []).join() === faults.join()) return state;
+      return commit(
+        state,
+        updateComponent(s, action.id, (c) => {
+          const { faults: _old, ...rest } = c;
+          return faults.length ? { ...rest, faults } : rest;
+        }),
+      );
+    }
+    case 'setWireBroken': {
+      const w = s.wires.find((w) => w.id === action.id);
+      if (!w || !!w.broken === action.broken) return state;
+      return commit(state, {
+        ...s,
+        wires: s.wires.map((x) => {
+          if (x.id !== action.id) return x;
+          const { broken: _old, ...rest } = x;
+          return action.broken ? { ...rest, broken: true } : rest;
+        }),
+      });
+    }
+    case 'setHideFaults': {
+      if (!!s.hideFaults === action.hide) return state;
+      const { hideFaults: _old, ...rest } = s;
+      return commit(state, action.hide ? { ...rest, hideFaults: true } : rest);
+    }
+    case 'setTask': {
+      if (JSON.stringify(s.task) === JSON.stringify(action.task)) return state;
+      const { task: _old, ...rest } = s;
+      return commit(state, action.task ? { ...rest, task: action.task } : rest);
+    }
     case 'setTitle': {
       const title = action.title.trim();
       if (title === (s.title ?? '')) return state;
@@ -395,4 +436,12 @@ export function editorReducer(state: EditorState, action: EditorAction): EditorS
       return { schematic: next, selection: EMPTY_SELECTION, past: [...state.past, s], future: state.future.slice(1) };
     }
   }
+}
+
+/** İki terminal aynı fiziksel alanda mı (elektrik / pnömatik / hidrolik); bağlantı noktası her alana uyar. */
+export function sameDomain(s: Schematic, a: TerminalRef, b: TerminalRef): boolean {
+  const ca = s.components.find((c) => c.id === a.component);
+  const cb = s.components.find((c) => c.id === b.component);
+  if (!ca || !cb || ca.type === 'junction' || cb.type === 'junction') return true;
+  return terminalDomain(ca, a.terminal) === terminalDomain(cb, b.terminal);
 }

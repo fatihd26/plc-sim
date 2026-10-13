@@ -4,7 +4,9 @@
 // iç içe aynı tür gruplar düzleştirilir.
 
 import { FUNC_COUNT, parseFunc } from './address';
+import { BOX_SPECS } from './boxes';
 import {
+  isBox,
   isCounter,
   isTimer,
   type Coil,
@@ -128,6 +130,13 @@ function retype(program: LadderProgram, coil: Coil, type: CoilType): Coil {
   if (type !== 'coil') out.type = type;
   if (coil.label) out.label = coil.label;
   const func = parseFunc(coil.address);
+  if (isBox(type)) {
+    const spec = BOX_SPECS[type];
+    const same = coil.type === type;
+    out.address = same ? coil.address : spec.defaultOut;
+    out.args = Object.fromEntries(spec.args.map((a) => [a.key, (same && coil.args?.[a.key]) || a.default]));
+    return out;
+  }
   if (isTimer(type) || isCounter(type)) {
     const area = isTimer(type) ? 'T' : 'C';
     const same = isTimer(type) ? isTimer(coil.type) : isCounter(coil.type);
@@ -136,7 +145,7 @@ function retype(program: LadderProgram, coil: Coil, type: CoilType): Coil {
     if (type === 'TONR' || type === 'CTU' || type === 'CTUD') out.reset = coil.reset ?? '%I0.1';
     if (type === 'CTD') out.load = coil.load ?? '%I0.1';
     if (type === 'CTUD') out.down = coil.down ?? '%I0.2';
-  } else if (func && type !== 'reset') {
+  } else if ((func || /^%?[MQI]W\d+$/i.test(coil.address)) && type !== 'reset') {
     out.address = '%Q0.0';
   }
   return out;
@@ -262,7 +271,7 @@ export function updateContact(program: LadderProgram, id: string, patch: Contact
   return updateNetwork(program, net.id, (n) => ({ ...n, logic: logic! }));
 }
 
-export type CoilPatch = Partial<Pick<Coil, 'address' | 'label' | 'preset' | 'reset' | 'load' | 'down'>>;
+export type CoilPatch = Partial<Pick<Coil, 'address' | 'label' | 'preset' | 'reset' | 'load' | 'down' | 'args'>>;
 
 export function updateCoil(program: LadderProgram, netId: string, patch: CoilPatch): LadderProgram {
   return updateNetwork(program, netId, (n) => {

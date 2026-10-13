@@ -1,27 +1,28 @@
 // Mantıksal bağlantı çözücü (MNA değil).
 // Kablolar ve kapalı iç kontaklar terminalleri union-find ile aynı nete birleştirir;
 // kaynaklar netlere potansiyel etiketi verir. Bir nette iki farklı etiket = kısa devre.
+// Aynı çözücü akışkan devrelerde de kullanılır (etiketler P = basınç, T = tahliye).
 
 export type Potential = 'P24' | 'M0' | 'L1' | 'L2' | 'L3' | 'N';
 export type NetPotential = Potential | 'short' | null;
 
-export interface NetResult {
+export interface NetResult<P extends string = Potential> {
   /** Terminal indeksi → net (kök) indeksi. */
   netOf(terminal: number): number;
   /** Terminalin bulunduğu netin potansiyeli; kısa devre netinde 'short'. */
-  potential(terminal: number): NetPotential;
+  potential(terminal: number): P | 'short' | null;
   /** Kısa devre olan netlerin terminal indeksleri (net başına bir dizi). */
   shorts: number[][];
 }
 
-export class NetSolver {
+export class NetSolver<P extends string = Potential> {
   private readonly parent: Int32Array;
-  private readonly sources: (Potential | null)[];
-  private readonly extraSources: [number, Potential][] = [];
+  private readonly sources: (P | null)[];
+  private readonly extraSources: [number, P][] = [];
 
   constructor(readonly size: number) {
     this.parent = new Int32Array(size);
-    this.sources = new Array<Potential | null>(size).fill(null);
+    this.sources = new Array<P | null>(size).fill(null);
     this.reset();
   }
 
@@ -51,14 +52,14 @@ export class NetSolver {
     else if (rb < ra) this.parent[ra] = rb;
   }
 
-  addSource(terminal: number, p: Potential): void {
+  addSource(terminal: number, p: P): void {
     if (this.sources[terminal] === null) this.sources[terminal] = p;
     else this.extraSources.push([terminal, p]);
   }
 
-  solve(): NetResult {
-    const netPot = new Map<number, NetPotential>();
-    const add = (terminal: number, p: Potential) => {
+  solve(): NetResult<P> {
+    const netPot = new Map<number, P | 'short' | null>();
+    const add = (terminal: number, p: P) => {
       const root = this.find(terminal);
       const cur = netPot.get(root);
       if (cur === undefined || cur === null) netPot.set(root, p);

@@ -50,7 +50,7 @@ function resolveLocal(p: ModbusPoll): LocalTarget {
     return { kind: 'bits', area: a.area, start };
   }
   const w = parseWord(p.local);
-  if (!w) throw new Error('register işlevlerinde yerel adres %MW olmalı');
+  if (!w || w.area !== 'MW') throw new Error('register işlevlerinde yerel adres %MW olmalı');
   if (w.index + p.qty > MW_COUNT) throw new Error(`${p.local} + ${p.qty} kelime %MW${MW_COUNT - 1} sınırını aşıyor`);
   return { kind: 'words', start: w.index };
 }

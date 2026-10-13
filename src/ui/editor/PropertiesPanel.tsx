@@ -1,7 +1,11 @@
 import type { ReactNode } from 'react';
+import { ANALOG_FULL } from '../../sim/address';
 import { CATALOG, paramOf, terminalsOf, titleOf, type ParamSpec } from '../../sim/catalog';
-import { pagesOf, type ComponentInstance, type Schematic, type TerminalRef } from '../../sim/schematic';
-import type { ComponentState, SimCommand, SimSnapshot } from '../../sim/simulation';
+import { faultsOf, pagesOf, type ComponentInstance, type Schematic, type TerminalRef } from '../../sim/schematic';
+import { componentSignals, providesOf } from '../../sim/signals';
+import type { ComponentState, Signal, SimCommand, SimSnapshot } from '../../sim/simulation';
+import { viewOf } from '../devices';
+import { numOf, type Control } from '../devices/types';
 import { MotorView } from '../MotorView';
 import { single, type EditorAction, type Selection } from './document';
 import { xrefTargets } from './layout';
@@ -75,6 +79,7 @@ export function PropertiesPanel(props: Props) {
     const w = schematic.wires.find((w) => w.id === one.id);
     if (!w) return <Shell />;
     const pot = snapshot?.potentials[`${w.a.component}:${w.a.terminal}`];
+    const sig = snapshot?.signals[`${w.a.component}:${w.a.terminal}`];
     return (
       <Shell>
         <h3>Kablo {w.id}</h3>
@@ -91,7 +96,27 @@ export function PropertiesPanel(props: Props) {
               <dd className={`pot p-${pot ?? 'none'}`}>{pot ? POTENTIAL_TEXT[pot] : 'yok'}</dd>
             </>
           )}
+          {sig && (
+            <>
+              <dt>Sinyal</dt>
+              <dd className="mono">{signalText(sig)}</dd>
+            </>
+          )}
         </dl>
+        {!(schematic.hideFaults && !edit) && (
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={edit ? !!w.broken : (snapshot?.brokenWires.includes(w.id) ?? false)}
+              onChange={(e) =>
+                edit
+                  ? dispatch({ type: 'setWireBroken', id: w.id, broken: e.target.checked })
+                  : props.send({ type: 'wireFault', component: w.id, broken: e.target.checked })
+              }
+            />
+            Kablo kopuk {edit ? '(simülasyon başında)' : '(arıza)'}
+          </label>
+        )}
         {edit && (
           <>
             <div className="btn-row">
@@ -141,7 +166,7 @@ export function PropertiesPanel(props: Props) {
             X {c.x} · Y {c.y} · {c.rotation}°
           </dd>
           {spec.params.map((p) => (
-            <ParamField key={p.key} spec={p} inst={c} disabled={!edit} dispatch={dispatch} />
+            <ParamField key={p.key} spec={p} inst={c} disabled={!edit} dispatch={dispatch} schematic={schematic} />
           ))}
         </dl>
         {c.type === 'xref' && <XrefInfo schematic={schematic} c={c} pages={pages} onJump={props.onJump} />}
@@ -163,6 +188,8 @@ export function PropertiesPanel(props: Props) {
           </div>
         )}
         {state && <LiveState id={c.id} name={c.name} state={state} inst={c} {...props} />}
+        {state && <SignalTable state={state} />}
+        <FaultSection c={c} {...props} />
         {c.type !== 'junction' && (
           <>
             <h4>Terminaller</h4>
@@ -214,6 +241,16 @@ export function PropertiesPanel(props: Props) {
         <dt>Kablo</dt>
         <dd>{schematic.wires.length}</dd>
       </dl>
+      {edit && (
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={!!schematic.hideFaults}
+            onChange={(e) => dispatch({ type: 'setHideFaults', hide: e.target.checked })}
+          />
+          Başlangıç arızalarını ve kopuk kabloları simülasyonda gizle (arıza bulma alıştırması)
+        </label>
+      )}
       {snapshot && (
         <>
           <h4>Olaylar</h4>
@@ -252,11 +289,13 @@ function ParamField({
   inst,
   disabled,
   dispatch,
+  schematic,
 }: {
   spec: ParamSpec;
   inst: ComponentInstance;
   disabled: boolean;
   dispatch(action: EditorAction): void;
+  schematic: Schematic;
 }) {
   const value = paramOf(inst, spec.key);
   const set = (v: number | string) => dispatch({ type: 'setParam', id: inst.id, key: spec.key, value: v });
@@ -283,6 +322,20 @@ function ParamField({
             />
             {spec.unit && <span className="muted">{spec.unit}</span>}
           </span>
+        ) : spec.kind === 'target' ? (
+          <select value={String(value)} disabled={disabled} onChange={(e) => set(e.target.value)}>
+            <option value="">— yok (simülasyonda elle) —</option>
+            {schematic.components
+              .filter((o) => o.id !== inst.id && providesOf(o.type).includes(spec.accepts))
+              .map((o) => (
+                <option key={o.id} value={o.name}>
+                  {o.name} ({titleOf(o)})
+                </option>
+              ))}
+            {value !== '' && !schematic.components.some((o) => o.name === value) && (
+              <option value={String(value)}>{String(value)} (şemada yok)</option>
+            )}
+          </select>
         ) : (
           <select value={String(value)} disabled={disabled} onChange={(e) => set(e.target.value)}>
             {spec.options.map((o) => (
@@ -475,78 +528,43 @@ function LiveState({
           <MotorView motor={state} name={name} />
         </Live>
       );
-    case 'cylinder':
-      return (
-        <Live>
-          <p>
-            <Lamp on={state.valve} fault={!!state.fault} /> Valf {state.fault ?? (state.valve ? 'enerjili (ileri)' : 'enerjisiz (geri)')}
-          </p>
-          <p className="mono">Konum: %{Math.round(state.position * 100)}</p>
-          <div className="heat" title="Piston konumu">
-            <div style={{ width: `${state.position * 100}%` }} />
-          </div>
-          <p>
-            <Lamp on={state.retracted} /> 13-14 geride · <Lamp on={state.extended} /> 23-24 ileride
-          </p>
-        </Live>
-      );
-    case 'conveyor':
-      return (
-        <Live>
-          <p>
-            <Lamp on={state.powered} /> {state.powered ? 'Çalışıyor' : state.speed !== 0 ? 'Yavaşlıyor' : 'Duruyor'}
-            {state.speed !== 0 && (state.direction > 0 ? ' · ileri' : ' · geri')}
-          </p>
-          <p className="mono">
-            {state.rpm.toFixed(0)} dev/dk · I = {state.currentA.toFixed(2)} A
-          </p>
-          <p>
-            <Lamp on={state.sensor} /> Fotosel 13-14 {state.sensor ? '(kutu var)' : '(boş)'}
-          </p>
-          <p>
-            Bantta {state.boxes.length} kutu · teslim edilen {state.delivered}
-          </p>
-          <button type="button" onClick={() => send({ type: 'addBox', component: id })}>
-            Kutu ekle
-          </button>
-        </Live>
-      );
-    case 'fan':
-      return (
-        <Live>
-          <p>
-            <Lamp on={state.powered} fault={!!state.fault} />{' '}
-            {state.fault ?? (state.powered ? 'Çalışıyor' : state.speed !== 0 ? 'Yavaşlıyor' : 'Duruyor')}
-          </p>
-          <p className="mono">{state.rpm.toFixed(0)} dev/dk</p>
-        </Live>
-      );
-    case 'pump':
-      return (
-        <Live>
-          <p>
-            <Lamp on={state.powered} fault={state.overflowing} />{' '}
-            {state.overflowing ? 'DEPO TAŞIYOR' : state.powered ? 'Pompa çalışıyor' : 'Pompa duruyor'}
-          </p>
-          <p className="mono">
-            {state.rpm.toFixed(0)} dev/dk · I = {state.currentA.toFixed(2)} A
-          </p>
-          <p className="mono">Seviye: %{Math.round(state.level * 100)}</p>
-          <div className="heat" title="Depo seviyesi">
-            <div style={{ width: `${state.level * 100}%` }} />
-          </div>
-          <p>
-            <Lamp on={state.low} /> 13-14 alt (%{state.lowAt * 100}) · <Lamp on={state.high} /> 23-24 üst (%
-            {state.highAt * 100})
-          </p>
-        </Live>
-      );
     case 'plc':
       return (
         <Live>
           <p>
             <Lamp on={state.powered} /> {state.powered ? 'RUN' : 'Besleme yok'} · scan #{state.scanCount}
           </p>
+          <table className="terms">
+            <tbody>
+              {state.ai.map((a, i) => (
+                <tr key={`ai${i}`}>
+                  <td className="mono">AI{i} %IW{i}</td>
+                  <td className="mono">{a.raw >= 32767 ? '32767 (taşma / kablo kopuk)' : a.raw}</td>
+                  <td className="muted small">
+                    {a.type === '4-20mA'
+                      ? `${(4 + (a.raw * 16) / ANALOG_FULL).toFixed(1)} mA`
+                      : `${((a.raw * 10) / ANALOG_FULL).toFixed(2)} V`}
+                  </td>
+                </tr>
+              ))}
+              {state.aq.map((v, i) => (
+                <tr key={`aq${i}`}>
+                  <td className="mono">AQ{i} %QW{i}</td>
+                  <td className="mono">{v}</td>
+                  <td className="muted small">{((Math.max(0, Math.min(ANALOG_FULL, v)) * 10) / ANALOG_FULL).toFixed(2)} V</td>
+                </tr>
+              ))}
+              {state.hsc.map((v, i) =>
+                v === null ? null : (
+                  <tr key={`hc${i}`}>
+                    <td className="mono">HC{i}</td>
+                    <td className="mono">{v}</td>
+                    <td className="muted small">hızlı sayıcı</td>
+                  </tr>
+                ),
+              )}
+            </tbody>
+          </table>
         </Live>
       );
     case 'esp32':
@@ -640,8 +658,148 @@ function LiveState({
         </Live>
       );
     }
-    default:
-      return null;
+    default: {
+      const view = viewOf(state.type);
+      const controls = view?.controls?.filter((c) => !c.when || c.when(state)) ?? [];
+      if (!controls.length) return null;
+      return (
+        <Live>
+          <div className="controls">
+            {controls.map((ctl, i) => (
+              <ControlField key={i} ctl={ctl} s={state} id={id} send={send} onButton={onButton} />
+            ))}
+          </div>
+        </Live>
+      );
+    }
+  }
+}
+
+function ControlField({
+  ctl,
+  s,
+  id,
+  send,
+  onButton,
+}: {
+  ctl: Control<unknown>;
+  s: unknown;
+  id: string;
+  send(command: SimCommand): void;
+  onButton(component: string, pressed: boolean): void;
+}) {
+  switch (ctl.kind) {
+    case 'button':
+      return (
+        <button type="button" onClick={() => send({ type: 'device', component: id, action: ctl.action, value: ctl.value?.(s) })}>
+          {typeof ctl.label === 'string' ? ctl.label : ctl.label(s)}
+        </button>
+      );
+    case 'hold': {
+      const held = ctl.held(s);
+      return (
+        <button type="button" className={held ? 'active' : ''} onClick={() => onButton(id, !held)}>
+          {held ? `${ctl.label} (bırak)` : ctl.label}
+        </button>
+      );
+    }
+    case 'slider': {
+      const v = ctl.value(s);
+      const unit = typeof ctl.unit === 'function' ? ctl.unit(s) : ctl.unit;
+      return (
+        <label className="slider">
+          <span>
+            {ctl.label}: <span className="mono">{+v.toFixed(2)}</span>
+            {unit ? ` ${unit}` : ''}
+          </span>
+          <input
+            type="range"
+            min={numOf(ctl.min, s)}
+            max={numOf(ctl.max, s)}
+            step={ctl.step}
+            value={v}
+            onChange={(e) => send({ type: 'device', component: id, action: ctl.action, value: Number(e.target.value) })}
+          />
+        </label>
+      );
+    }
+  }
+}
+
+/** Bileşenin adlandırılmış canlı değerleri (trend ve görev senaryolarında kullanılan adlarla). */
+function SignalTable({ state }: { state: ComponentState }) {
+  if (state.type === 'plc' || state.type === 'esp32') return null;
+  const entries = Object.entries(componentSignals(state));
+  if (!entries.length) return null;
+  return (
+    <details className="signals" open={!!viewOf(state.type)}>
+      <summary>Sinyaller</summary>
+      <table className="terms">
+        <tbody>
+          {entries.map(([k, sig]) => (
+            <tr key={k}>
+              <td>{sig.label}</td>
+              <td className="mono">
+                {typeof sig.value === 'boolean' ? (
+                  <Lamp on={sig.value} />
+                ) : (
+                  `${+sig.value.toFixed(2)}${sig.unit ? ` ${sig.unit}` : ''}`
+                )}
+              </td>
+              <td className="mono muted small">.{k}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </details>
+  );
+}
+
+/** Arıza enjeksiyonu: düzenlemede başlangıç arızaları, simülasyonda anlık arızalar. */
+function FaultSection({ c, schematic, mode, snapshot, send, dispatch }: Props & { c: ComponentInstance }) {
+  const faults = faultsOf(c.type);
+  if (!faults.length) return null;
+  const edit = mode === 'edit';
+  if (!edit && schematic.hideFaults) return null;
+  const active = edit ? (c.faults ?? []) : (snapshot?.faults[c.id] ?? []);
+  return (
+    <details className="faults" open={active.length > 0}>
+      <summary>
+        Arıza {edit ? 'ayarla (simülasyon başında)' : 'enjeksiyonu'}
+        {active.length > 0 && <span className="count">{active.length}</span>}
+      </summary>
+      {faults.map((f) => (
+        <label key={f.key} className="check">
+          <input
+            type="checkbox"
+            checked={active.includes(f.key)}
+            onChange={(e) =>
+              edit
+                ? dispatch({
+                    type: 'setFaults',
+                    id: c.id,
+                    faults: e.target.checked ? [...active, f.key] : active.filter((k) => k !== f.key),
+                  })
+                : send({ type: 'fault', component: c.id, fault: f.key, active: e.target.checked })
+            }
+          />
+          {f.label}
+        </label>
+      ))}
+    </details>
+  );
+}
+
+export function signalText(s: Signal): string {
+  switch (s.kind) {
+    case 'V':
+      return `${s.v.toFixed(2)} V`;
+    case 'mA':
+      return `${s.ma.toFixed(2)} mA`;
+    case 'pulse':
+      return `enkoder darbe ${Math.round(s.pos)}`;
+    case 'drive':
+      return `VFD ${s.hz.toFixed(1)} Hz`;
   }
 }
 

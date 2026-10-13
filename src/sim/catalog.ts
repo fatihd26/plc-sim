@@ -1,8 +1,35 @@
 // Bileşen kütüphanesi (elektriksel taraf): her tipin terminalleri, etiket öneki ve parametreleri.
 // Çizim geometrisi UI katmanındadır; terminal adları iki taraf arasındaki sözleşmedir.
-// Kullanıcı tanımlı bileşenler (`custom`) tanımlarını şema dokümanında taşır (CustomDef).
+// Çekirdek tipler burada, diğerleri bileşen modüllerinde (modules/) tanımlıdır; CATALOG ikisini
+// birleştirir. Kullanıcı tanımlı bileşenler (`custom`) tanımlarını şema dokümanında taşır.
 
-export type ComponentType =
+import { MODULES, type ModuleType } from './modules';
+import {
+  choice,
+  num,
+  readParam,
+  voltageParam,
+  VOLTAGE_OPTIONS,
+  type ComponentSpec,
+  type Domain,
+  type ParamSpec,
+  type ParamValue,
+  type Voltage,
+} from './spec';
+
+export {
+  CATEGORIES,
+  VOLTAGE_OPTIONS,
+  type Category,
+  type ComponentSpec,
+  type Domain,
+  type ParamSpec,
+  type ParamValue,
+  type Voltage,
+} from './spec';
+
+/** Davranışı simulation.ts içinde olan çekirdek tipler. */
+export type CoreType =
   | 'mains3'
   | 'psu24'
   | 'buttonNO'
@@ -20,75 +47,15 @@ export type ComponentType =
   | 'terminal'
   | 'junction'
   | 'xref'
-  | 'cylinder'
-  | 'conveyor'
-  | 'fan'
-  | 'pump'
   | 'custom';
 
-export type Category =
-  | 'Kaynaklar'
-  | 'Komuta'
-  | 'Şalt'
-  | 'Koruma'
-  | 'Tüketiciler'
-  | 'Sinyal'
-  | 'Kontrol'
-  | 'Bağlantı'
-  | 'Mekanik'
-  | 'Kullanıcı';
-
-export const CATEGORIES: readonly Category[] = [
-  'Kaynaklar',
-  'Komuta',
-  'Şalt',
-  'Koruma',
-  'Tüketiciler',
-  'Sinyal',
-  'Kontrol',
-  'Bağlantı',
-  'Mekanik',
-  'Kullanıcı',
-];
-
-/** Yük (bobin, lamba) anma gerilimi. */
-export type Voltage = '24DC' | '230AC';
-
-export const VOLTAGE_OPTIONS: { value: Voltage; label: string }[] = [
-  { value: '24DC', label: '24 V DC' },
-  { value: '230AC', label: '230 V AC' },
-];
-
-export type ParamSpec =
-  | {
-      key: string;
-      label: string;
-      kind: 'number';
-      unit?: string;
-      default: number;
-      min: number;
-      max: number;
-      step: number;
-    }
-  | { key: string; label: string; kind: 'enum'; default: string; options: { value: string; label: string }[] };
-
-export type ParamValue = number | string;
-
-export interface ComponentSpec {
-  type: ComponentType;
-  title: string;
-  /** IEC 81346 benzeri etiket öneki (K1, S1, M1...). */
-  prefix: string;
-  /** Kütüphanede gösterilen kısa açıklama. */
-  description: string;
-  category: Category;
-  terminals: readonly string[];
-  params: readonly ParamSpec[];
-  /** Kütüphanede doğrudan listelenmez (ör. kullanıcı tanımlı bileşenin taban tipi). */
-  hidden?: boolean;
-}
+export type ComponentType = CoreType | ModuleType;
 
 export const PLC_DI = ['I0.0', 'I0.1', 'I0.2', 'I0.3', 'I0.4', 'I0.5', 'I0.6', 'I0.7'] as const;
+export const PLC_DQ = ['Q0.0', 'Q0.1', 'Q0.2', 'Q0.3', 'Q0.4', 'Q0.5', 'Q0.6', 'Q0.7'] as const;
+/** PLC analog girişleri (%IW0, %IW1) ve çıkışları (%QW0, %QW1). */
+export const PLC_AI = ['AI0', 'AI1'] as const;
+export const PLC_AQ = ['AQ0', 'AQ1'] as const;
 /** ESP32 I/O kartının G/Ç pinleri (esp32.ts ile aynı sıra). */
 export const ESP32_PINS = ['GPIO16', 'GPIO17', 'GPIO18', 'GPIO19'] as const;
 
@@ -115,37 +82,20 @@ const pinAddr = (pin: string): ParamSpec => ({
   ],
 });
 
-export const PLC_DQ = ['Q0.0', 'Q0.1', 'Q0.2', 'Q0.3', 'Q0.4', 'Q0.5', 'Q0.6', 'Q0.7'] as const;
+const aiType = (i: number) =>
+  choice(`ai${i}Type`, `AI${i} (%IW${i}) sinyal tipi`, '0-10V', [
+    ['0-10V', '0–10 V'],
+    ['4-20mA', '4–20 mA'],
+  ]);
 
-const num = (key: string, label: string, def: number, min: number, max: number, step: number, unit?: string): ParamSpec => ({
-  key,
-  label,
-  kind: 'number',
-  default: def,
-  min,
-  max,
-  step,
-  unit,
-});
+const hscMode = (i: number, a: string, b: string) =>
+  choice(`hsc${i}`, `HSC${i} hızlı sayıcı (HC${i})`, 'off', [
+    ['off', 'Kapalı'],
+    ['up', `Yukarı sayma: ${a} darbe girişi`],
+    ['quad', `A/B kuadratür: ${a} = A, ${b} = B (yön algılar)`],
+  ]);
 
-const voltageParam = (key: string, label: string, def: Voltage = '24DC'): ParamSpec => ({
-  key,
-  label,
-  kind: 'enum',
-  default: def,
-  options: VOLTAGE_OPTIONS,
-});
-
-/** Mekanik elemanların tahrik motoru (3~): akım ve zaman sabitleri. */
-const driveParams = (ratedCurrentA: number, ratedRpm: number): ParamSpec[] => [
-  num('ratedCurrentA', 'Motor nominal akımı', ratedCurrentA, 0.1, 100, 0.1, 'A'),
-  num('ratedRpm', 'Motor nominal hızı', ratedRpm, 100, 3600, 10, 'dev/dk'),
-  num('lockedRotorRatio', 'Kalkış akımı / In', 6, 1, 10, 0.5),
-  num('startTauMs', 'Kalkış zaman sabiti', 400, 10, 10_000, 10, 'ms'),
-  num('coastTauMs', 'Duruş zaman sabiti', 800, 10, 60_000, 10, 'ms'),
-];
-
-export const CATALOG: Record<ComponentType, ComponentSpec> = {
+const CORE: Record<CoreType, ComponentSpec> = {
   mains3: {
     type: 'mains3',
     title: 'Şebeke 3~/N 400/230 V',
@@ -256,7 +206,7 @@ export const CATALOG: Record<ComponentType, ComponentSpec> = {
     title: 'Asenkron motor 3~',
     prefix: 'M',
     category: 'Tüketiciler',
-    description: 'Faz sırası dönüş yönünü belirler; yük oranı akımı değiştirir',
+    description: 'Faz sırası dönüş yönünü belirler; yük oranı akımı değiştirir. VFD çıkışında hız frekansla değişir',
     terminals: ['U', 'V', 'W'],
     params: [
       num('ratedCurrentA', 'Nominal akım', 4, 0.1, 100, 0.1, 'A'),
@@ -276,36 +226,30 @@ export const CATALOG: Record<ComponentType, ComponentSpec> = {
     terminals: ['X1', 'X2'],
     params: [
       voltageParam('voltage', 'Anma gerilimi'),
-      {
-        key: 'color',
-        label: 'Renk',
-        kind: 'enum',
-        default: 'green',
-        options: [
-          { value: 'green', label: 'Yeşil' },
-          { value: 'red', label: 'Kırmızı' },
-          { value: 'yellow', label: 'Sarı' },
-          { value: 'white', label: 'Beyaz' },
-        ],
-      },
+      choice('color', 'Renk', 'green', [
+        ['green', 'Yeşil'],
+        ['red', 'Kırmızı'],
+        ['yellow', 'Sarı'],
+        ['white', 'Beyaz'],
+      ]),
     ],
   },
   plc: {
     type: 'plc',
-    title: 'PLC (8 DI / 8 DQ)',
+    title: 'PLC (8 DI / 8 DQ / 2 AI / 2 AQ)',
     prefix: 'A',
     category: 'Kontrol',
-    description: '24 V DC giriş/çıkış, RS485 Modbus RTU master; ladder programı ve Modbus tablosu alt panelden düzenlenir',
-    terminals: ['L+', 'M', ...PLC_DI, ...PLC_DQ, 'RS485_A', 'RS485_B'],
+    description:
+      '24 V DC giriş/çıkış, 2 analog giriş (%IW0-1, 0–10 V / 4–20 mA → 0..27648), 2 analog çıkış ' +
+      '(%QW0-1 → 0–10 V), 2 hızlı sayıcı (HC0-1), RS485 Modbus RTU master',
+    terminals: ['L+', 'M', ...PLC_DI, ...PLC_DQ, 'RS485_A', 'RS485_B', ...PLC_AI, ...PLC_AQ],
     params: [
       num('scanTimeMs', 'Scan süresi', 10, 1, 100, 1, 'ms'),
-      {
-        key: 'baud',
-        label: 'RS485 baud hızı',
-        kind: 'enum',
-        default: '19200',
-        options: ['9600', '19200', '38400', '115200'].map((v) => ({ value: v, label: `${v} bit/s` })),
-      },
+      aiType(0),
+      aiType(1),
+      hscMode(0, 'I0.0', 'I0.1'),
+      hscMode(1, 'I0.2', 'I0.3'),
+      choice('baud', 'RS485 baud hızı', '19200', ['9600', '19200', '38400', '115200'].map((v) => [v, `${v} bit/s`])),
       num('timeoutMs', 'Modbus zaman aşımı', 200, 10, 5000, 10, 'ms'),
     ],
   },
@@ -318,26 +262,14 @@ export const CATALOG: Record<ComponentType, ComponentSpec> = {
       '24 V besleme, 4 GPIO (giriş/çıkış seçilebilir, 24 V), ADC1 (0–10 V), RS485 Modbus RTU slave. Çıkışlar yalnız röle bobini sürer',
     terminals: ['24V', 'GND', 'RS485_A', 'RS485_B', ...ESP32_PINS, 'ADC1'],
     params: [
-      {
-        key: 'firmware',
-        label: 'Firmware',
-        kind: 'enum',
-        default: 'ladder',
-        options: [
-          { value: 'ladder', label: 'Ladder programı (PLC gibi; alt panelden düzenlenir)' },
-          { value: 'modbusSlave', label: 'Modbus slave G/Ç (coil → çıkış, giriş → DI)' },
-          { value: 'local', label: 'Yerel: giriş çıkışa aktarılır (GPIO16 → 18, 17 → 19)' },
-        ],
-      },
+      choice('firmware', 'Firmware', 'ladder', [
+        ['ladder', 'Ladder programı (PLC gibi; alt panelden düzenlenir)'],
+        ['modbusSlave', 'Modbus slave G/Ç (coil → çıkış, giriş → DI)'],
+        ['local', 'Yerel: giriş çıkışa aktarılır (GPIO16 → 18, 17 → 19)'],
+      ]),
       ...ESP32_PINS.flatMap((pin, i) => [pinMode(pin, i < 2 ? 'in' : 'out'), pinAddr(pin)]),
       num('slaveId', 'Modbus adresi', 1, 1, 247, 1),
-      {
-        key: 'baud',
-        label: 'Baud hızı',
-        kind: 'enum',
-        default: '19200',
-        options: ['9600', '19200', '38400', '115200'].map((v) => ({ value: v, label: `${v} bit/s` })),
-      },
+      choice('baud', 'Baud hızı', '19200', ['9600', '19200', '38400', '115200'].map((v) => [v, `${v} bit/s`])),
       num('loopMs', 'Firmware döngüsü', 10, 1, 1000, 1, 'ms'),
     ],
   },
@@ -368,66 +300,6 @@ export const CATALOG: Record<ComponentType, ComponentSpec> = {
     terminals: ['1'],
     params: [],
   },
-  cylinder: {
-    type: 'cylinder',
-    title: 'Pnömatik silindir + valf',
-    prefix: 'Y',
-    category: 'Mekanik',
-    description:
-      'Çift etkili silindir, 5/2 yaylı selenoid valf (A1-A2). Bobin enerjiliyken ileri gider. ' +
-      'Uç sensörleri: 13-14 geride, 23-24 ileride kapanır',
-    terminals: ['A1', 'A2', '13', '14', '23', '24'],
-    params: [
-      voltageParam('coilVoltage', 'Valf bobin gerilimi'),
-      num('extendMs', 'İleri gitme süresi', 1000, 50, 20_000, 50, 'ms'),
-      num('retractMs', 'Geri dönme süresi', 1000, 50, 20_000, 50, 'ms'),
-    ],
-  },
-  conveyor: {
-    type: 'conveyor',
-    title: 'Konveyör bant',
-    prefix: 'M',
-    category: 'Mekanik',
-    description:
-      '3~ motorla (U-V-W) döner, faz sırası yönü belirler. Bant sonundaki fotosel (13-14) kutu ' +
-      'önündeyken kapanır. Simülasyonda banda tıklayınca kutu eklenir',
-    terminals: ['U', 'V', 'W', '13', '14'],
-    params: [
-      num('transitS', 'Kutunun bandı geçme süresi', 6, 1, 120, 0.5, 's'),
-      num('feedS', 'Otomatik kutu besleme aralığı (0 = kapalı)', 4, 0, 120, 0.5, 's'),
-      ...driveParams(2, 1400),
-    ],
-  },
-  fan: {
-    type: 'fan',
-    title: 'Fan',
-    prefix: 'M',
-    category: 'Mekanik',
-    description: 'Tek fazlı fan, X1-X2 arasında anma gerilimi varken döner (24 V DC / 230 V AC)',
-    terminals: ['X1', 'X2'],
-    params: [
-      voltageParam('voltage', 'Anma gerilimi', '230AC'),
-      num('ratedRpm', 'Nominal hız', 1400, 100, 3600, 10, 'dev/dk'),
-      num('startTauMs', 'Kalkış zaman sabiti', 800, 10, 10_000, 10, 'ms'),
-      num('coastTauMs', 'Duruş zaman sabiti', 2500, 10, 60_000, 10, 'ms'),
-    ],
-  },
-  pump: {
-    type: 'pump',
-    title: 'Su pompası + depo',
-    prefix: 'M',
-    category: 'Mekanik',
-    description:
-      '3~ pompa (U-V-W) depoyu doldurur, depodan sürekli su çekilir. Seviye sensörleri su ' +
-      'seviyesine ulaşınca kapanır: 13-14 alt (%20), 23-24 üst (%80)',
-    terminals: ['U', 'V', 'W', '13', '14', '23', '24'],
-    params: [
-      num('fillS', 'Boş depoyu doldurma süresi', 20, 1, 600, 1, 's'),
-      num('drainS', 'Dolu deponun boşalma süresi (0 = tüketim yok)', 40, 0, 600, 1, 's'),
-      num('initialPct', 'Başlangıç seviyesi', 10, 0, 100, 5, '%'),
-      ...driveParams(3, 2800),
-    ],
-  },
   custom: {
     type: 'custom',
     title: 'Kullanıcı bileşeni',
@@ -440,7 +312,34 @@ export const CATALOG: Record<ComponentType, ComponentSpec> = {
   },
 };
 
+export const CATALOG: Record<ComponentType, ComponentSpec> = {
+  ...CORE,
+  ...(Object.fromEntries(MODULES.map((m) => [m.spec.type, m.spec as ComponentSpec])) as Record<ModuleType, ComponentSpec>),
+};
+
 export const COMPONENT_TYPES = Object.keys(CATALOG) as ComponentType[];
+
+/** Çekirdek arızalar (modül arızaları modülde tanımlıdır). */
+export const CORE_FAULTS: Partial<Record<CoreType, { key: string; label: string }[]>> = {
+  buttonNO: [{ key: 'open', label: 'Kontak yanık (hiç kapanmıyor)' }],
+  buttonNC: [{ key: 'open', label: 'Kontak yanık (hiç kapanmıyor)' }],
+  estop: [{ key: 'open', label: 'Kontak yanık (devre sürekli açık)' }],
+  contactor: [
+    { key: 'coil', label: 'Bobin yanık (çekmiyor)' },
+    { key: 'welded', label: 'Ana kontaklar yapışık (bırakmıyor)' },
+  ],
+  relay: [
+    { key: 'coil', label: 'Bobin yanık (çekmiyor)' },
+    { key: 'welded', label: 'Kontaklar yapışık (bırakmıyor)' },
+  ],
+  lamp: [{ key: 'burnt', label: 'Ampul yanık' }],
+  motor3: [
+    { key: 'jam', label: 'Mil sıkışmış (kilitli rotor)' },
+    { key: 'phase', label: 'Bir faz kopuk (W sargısı)' },
+  ],
+  psu24: [{ key: 'dead', label: 'Güç kaynağı arızalı (çıkış yok)' }],
+  thermal: [{ key: 'stuck', label: '95-96 kontağı açık kalmış' }],
+};
 
 // --- Kullanıcı tanımlı bileşen ----------------------------------------------------------
 
@@ -521,15 +420,20 @@ export function prefixOf(inst: InstanceLike): string {
 
 /** Parametre değeri; tanımsız, tipi yanlış veya aralık dışıysa varsayılan/sınırlanmış değer. */
 export function paramOf(inst: InstanceLike, key: string): ParamValue {
-  const spec = CATALOG[inst.type].params.find((p) => p.key === key);
-  if (!spec) throw new Error(`${inst.type}: "${key}" parametresi yok`);
-  const v = inst.params?.[key];
-  if (spec.kind === 'number') {
-    if (typeof v !== 'number' || !Number.isFinite(v)) return spec.default;
-    return Math.min(spec.max, Math.max(spec.min, v));
-  }
-  return typeof v === 'string' && spec.options.some((o) => o.value === v) ? v : spec.default;
+  return readParam(CATALOG[inst.type].params, inst, key, inst.type);
 }
 
 export const numParam = (inst: InstanceLike, key: string) => paramOf(inst, key) as number;
 export const strParam = (inst: InstanceLike, key: string) => paramOf(inst, key) as string;
+
+/** Terminalin fiziksel alanı (elektrik, pnömatik, hidrolik). */
+export function terminalDomain(inst: InstanceLike, terminal: string): Domain {
+  if (inst.type === 'custom') return 'electric';
+  return CATALOG[inst.type].domains?.[terminal] ?? 'electric';
+}
+
+/** Örneğin parametre okuyucusu: `readParamOf(c).num('pickupMs')`. */
+export const readParamOf = (inst: InstanceLike) => ({
+  num: (key: string) => numParam(inst, key),
+  str: (key: string) => strParam(inst, key),
+});

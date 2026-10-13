@@ -1,4 +1,4 @@
-# PLC Simülatörü – v0.3
+# PLC Simülatörü – v0.4
 
 EPLAN/AutoCAD tarzı şema editörü + PLC simülasyonu. Bileşenler kütüphaneden çizim alanına
 sürüklenip bırakılır, terminaller kabloyla bağlanır; simülasyon modunda aynı şema canlı çalışır
@@ -21,7 +21,7 @@ npm run build      # tip kontrolü + üretim derlemesi
 | Çizim alanı | Sayfa çerçevesi ve antet, ızgara, yakalama (10), zoom, kaydırma, kutu ile seçim, engelden kaçan (A*) kablo yönlendirme |
 | Sayfa sekmeleri | Sayfa ekle / yeniden adlandır (çift tık) / sil |
 | Özellikler (sağ) | Seçili eleman/kablo: etiket, parametreler, terminal bağlantıları, canlı durum; proje adı ve olay günlüğü |
-| PLC paneli (alt) | Düzenlemede ladder editörü, simülasyonda online izleme ve I/O tablosu; PLC seçici |
+| Alt panel | **Program / Online izleme**: ladder editörü veya canlı izleme ve I/O tablosu; **Trend**: seçilen sinyallerin zaman grafiği; **Görev**: görev metni ve otomatik denetim |
 | Durum çubuğu | İmleç koordinatı, zoom, mod, son koruma olayı, kısa devre uyarısı |
 
 Şema tarayıcıda otomatik kaydedilir.
@@ -48,18 +48,59 @@ npm run build      # tip kontrolü + üretim derlemesi
 | Kategori | Bileşenler |
 |---|---|
 | Kaynaklar | Şebeke 3~/N 400/230 V (X), güç kaynağı 24 V DC – kısa devrede akım sınırlaması (G) |
-| Komuta | Buton NO / NC (S), acil stop – kilitlemeli (S) |
+| Komuta | Buton NO / NC (S), acil stop – kilitlemeli (S), set değeri potansiyometresi 0–10 V (R) |
 | Şalt | Kontaktör, bobin 24 V DC / 230 V AC (K); ara röle 13-14/23-24 NO, 31-32 NC (K) |
 | Koruma | Motor koruma şalteri – termik + manyetik açma (Q), otomatik sigorta 1P (F), termik röle (F) |
-| Tüketiciler | Asenkron motor 3~, yük oranı ayarlı (M) |
+| Tüketiciler | Asenkron motor 3~ (M), 6 uçlu Y/Δ motor – yıldızda 1/3 akım (M), frenli motor (M) |
+| Sürücüler | Frekans konvertörü: klemens (DI1-3, AI 0–10 V) veya Modbus RTU slave kumandası, rampa, röle çıkışları (T) |
 | Sinyal | Sinyal lambası 24 V DC / 230 V AC (P) |
-| Kontrol | PLC 8 DI / 8 DQ, kendi ladder programıyla, RS485 Modbus RTU master (A); ESP32 I/O kartı: 4 GPIO (24 V, giriş/çıkış seçilir), ADC1 0–10 V, RS485 Modbus slave; ladder ile programlanır (A) |
+| Sensörler | Endüktif (yalnız metal), kapasitif, optik sensör – 3 telli PNP (B); limit switch (S); artımlı enkoder A/B (B); seviye, sıcaklık (PT100), basınç transmitteri – 4–20 mA / 0–10 V (B) |
+| Kontrol | PLC 8 DI / 8 DQ / 2 AI / 2 AQ, 2 hızlı sayıcı, RS485 Modbus RTU master (A); ESP32 I/O kartı (A) |
 | Bağlantı | Klemens (X), bağlantı noktası (J), sayfa geçişi (XR) |
+| Mekanik | Pnömatik silindir + valf (Y), konveyör – karton/metal kutu (M), fan (M), pompa + depo (M) |
+| Proses | Seviye kontrol tankı – selenoid veya oransal giriş vanası, tüketim (T); elektrikli fırın – aç-kapa veya tristör, emniyet termostatı (E) |
+| Pnömatik | Hava kaynağı (P), 5/2 yay dönüşlü, 5/2 çift bobinli, 5/3 orta kapalı, 3/2 selenoid valf (Y), tek yönlü akış kontrol valfi (V), çift / tek etkili silindir (Z) |
+| Hidrolik | Güç ünitesi – pompa, emniyet valfi, tank (P); 4/3 valf – kapalı / tandem / yüzer merkez (Y); hidrolik silindir (Z); ekskavatör kolu – bom, arm, kova (Z) |
+| Robotik | Lineer eksen – enkoder, REF, sınır sensörleri (M); elektro-pnömatik pick & place (U); el sıkışmalı robot hücresi (R); 3 katlı asansör (M); garaj kapısı (M) |
 | Kullanıcı | Kutup türlerinden tanımlanan bileşenler (proje dosyasında saklanır) |
+
+**Sensör hedefi.** Sensör ve transmitterlerin "Algıladığı mekanizma / Ölçtüğü proses" parametresi
+bir bileşenin adıdır (konveyör, silindir, eksen, tank, fırın, güç ünitesi...). Konum sensörleri
+mekanizmanın belirli bir noktasına (%) bakar. Hedef seçilmezse simülasyonda sensöre tıklayarak
+nesne konur veya transmitter değeri kaydırıcıyla verilir.
+
+**Analog G/Ç.** Analog çıkışlı cihazlar (transmitter, potansiyometre, PLC AQ) bağlı oldukları
+nete sinyal yazar; kablolar mor noktalı görünür. PLC'de %IW0..1 ham değeri 0..27648'dir
+(0–10 V veya 4–20 mA, parametreyle seçilir); 4–20 mA girişte kablo kopuk veya yanlış sinyal tipi
+32767 okunur. %QW0..1 = 0..27648 → AQ0..1 = 0–10 V. Ladder kutu komutları: MOVE, ADD, SUB, MUL,
+DIV, SCALE ve PID (PLC komutları › Matematik / Analog ve PID).
+
+**Hızlı sayıcı.** PLC parametresinde HSC0 (I0.0/I0.1) ve HSC1 (I0.2/I0.3) yukarı sayma veya A/B
+kuadratür olarak açılır; değer `HC0`/`HC1` operandıyla karşılaştırılır, reset bobini (`R HC0`)
+sıfırlar.
+
+**Akışkan devreleri.** Pnömatik ve hidrolik portlar hortumla (kesikli mavi / turuncu) bağlanır;
+elektrik ucu akışkan portuna bağlanamaz. Basınçlı hat kalın çizilir. Hidrolikte pompa debisi en
+düşük basınç isteyen aktüatöre gider; hareket edemeyen sistemde emniyet valfi açar.
+
+**Arıza enjeksiyonu.** Özellikler panelinde her bileşenin arıza listesi vardır (bobin yanık, kontak
+yapışık, sensör arızalı, kaplin kaymış...). Düzenlemede işaretlenen arızalar ve "kablo kopuk"
+işaretli kablolar simülasyon başında etkindir; Proje ayarından öğrenciden gizlenebilir (arıza
+bulma alıştırması). Simülasyonda arızalar anlık açılıp kapatılabilir.
+
+**Trend.** Alt paneldeki Trend sekmesinde en fazla 4 sinyal ortak zaman ekseninde, her biri kendi
+şeridinde çizilir (5/10/30/60 s pencere). Sinyal adları Özellikler › Sinyaller tablosundadır.
+
+**Görev modu.** Bir projeye görev (açıklama + denetim senaryosu) eklenebilir. "Kontrol et",
+senaryoyu ayrı ve hızlı bir simülasyonda koşturup satır satır sonuç verir. Senaryo dili:
+`bas S1`, `bırak S1`, `tıkla S1 200 ms`, `aç/kapat Q1`, `eylem M1 addBox`, `arıza K1 coil`,
+`kopar w3`, `bekle 2 s`, `bekle K1.kontak en fazla 5 s`, `kontrol T1.seviye >= 45 ve değil P1.yanik
+boyunca 2 s`. Hazır görevler: Örnek ▾ › Görevler.
 
 PLC komutları şemaya değil PLC programına eklendiği için sol kütüphanede değil, alt paneldeki
 ladder editörünün solundaki **PLC komutları** menüsündedir: kontak NO/NC/P/N, karşılaştırma,
-bobin/ters bobin/set/reset, TON/TOF/TP/TONR (T0..T15), CTU/CTD/CTUD (C0..C15). Komut ladder
+bobin/ters bobin/set/reset, TON/TOF/TP/TONR (T0..T15), CTU/CTD/CTUD (C0..C15), MOVE/ADD/SUB/MUL/DIV,
+SCALE, PID. Komut ladder
 üzerine sürüklenir (elemana: sağına seri, Shift ile paralel; boş alana: yeni network) veya tıklanır.
 
 **ESP32 ladder ile programlanır.** Firmware "Ladder programı" (varsayılan) iken kart PLC gibi
@@ -89,12 +130,24 @@ valf gibi bir yük PLC veya ESP32 çıkış netine bağlanırsa simülasyonda ç
 beslenemez, araya röle koyun" arızası verir. Tek fazlı (230 V) ve 24 V yükler ara röle kontağı
 üzerinden beslenir; örneklerin tamamı bu düzendedir.
 
-Parametreler `sim/catalog.ts` içinde tip başına tanımlıdır ve Özellikler panelinde düzenlenir.
+## Yeni bileşen eklemek (modül sistemi)
 
-Yeni bir yerleşik tip eklemek için: `sim/catalog.ts` (terminaller, parametreler), `sim/simulation.ts`
-(davranış), `ui/editor/geometry.ts` (terminal konumları) ve `ui/editor/symbols.tsx` (çizim).
-`editor.test.ts` katalog ile geometrinin tutarlılığını denetler. Kod yazmadan bileşen eklemek için
-kütüphanedeki "Yeni bileşen tanımla" kullanılır.
+Bir bileşen iki dosyadır; çekirdek ve UI bileşen tipini başka hiçbir yerde tanımaz:
+
+1. **`src/sim/modules/<ad>.ts`** – `defineModule({ spec, create, links, drive, fluidLinks,
+   update, state, signals, faults, command, probe, measure, ... })`. `spec` terminalleri,
+   parametreleri, kategoriyi ve (varsa) akışkan portlarını tanımlar. Kancaların hangi fazda
+   çağrıldığı `src/sim/modules/types.ts` başında anlatılır. `src/sim/modules/index.ts` içindeki
+   `MODULES` listesine eklenir.
+2. **`src/ui/devices/<ad>.tsx`** – `defineView({ type, geometry, Body, click, controls })`:
+   terminal konumları, sembol çizimi, tıklama eylemi ve Özellikler panelindeki kontroller.
+   `src/ui/devices/index.ts` içindeki `VIEWS` listesine eklenir.
+
+Katalog, kütüphane, simülasyon, Özellikler (parametreler, sinyaller, arızalar, kontroller), trend,
+görev senaryoları ve hedef seçimi yeni bileşeni kendiliğinden tanır. `editor.test.ts` her modülün
+görünümü olduğunu ve terminallerin eşleştiğini, `purity.test.ts` modül kodunun deterministik
+kaldığını denetler. Testlerde ve örneklerde şema kurmak için `src/sim/build.ts` kullanılır.
+Kod yazmadan basit bileşen eklemek için kütüphanedeki "Yeni bileşen tanımla" hâlâ kullanılabilir.
 
 ## Yapı
 
@@ -110,8 +163,16 @@ src/sim/   Simülasyon çekirdeği (saf TS; React/DOM/Math.random/Date.now yasak
   modbusMaster.ts PLC Modbus master: tarama tablosu, doğrulama, periyodik istek, sonuçları %M/%MW'ye yazma
   ioConfig.ts     Kontrolör G/Ç eşlemesi (PLC sabit, ESP32 pin yönü/adresi), programdan otomatik yapılandırma
   modbus.ts       Modbus veri modeli, istek işleyici (FC1-6, 15, 16), RTU çerçeve/CRC, sanal RS485 bus
-  devices.ts      PushButton, Contactor, ThermalRelay, Motor
-  catalog.ts      Bileşen kütüphanesi: tip, kategori, terminaller, parametreler, kullanıcı tanımları
+  devices.ts      PushButton, Contactor, ThermalRelay, Motor, Cylinder, Conveyor, Tank
+  spec.ts         Bileşen tanımı ve parametre tipleri (çekirdek ve modüller ortak)
+  catalog.ts      Bileşen kütüphanesi: çekirdek tipler + modüller, kullanıcı tanımları, çekirdek arızalar
+  modules/        Bileşen modülleri: sensörler, analog, sürücüler, mekanik, proses, pnömatik, hidrolik, robotik
+  boxes.ts        Ladder kutu komutları (MOVE, ADD, SUB, MUL, DIV, SCALE, PID)
+  signals.ts      Bileşenlerin adlandırılmış canlı değerleri (trend ve görevler)
+  scenario.ts     Görev senaryosu dili ve çalıştırıcı
+  tasks.ts        Hazır görevler
+  build.ts        Kodla şema / ladder kurma yardımcıları
+  examplesLib.ts  Kütüphane örnek projeleri
   schematic.ts    Şema dokümanı (sayfalar, bileşenler, kablolar, kütüphane), doğrulama, sürüm taşıma
   netlist.ts      Union-find bağlantı çözücü, potansiyel ve kısa devre tespiti
   programs.ts     Start-stop mühürleme programı
@@ -123,6 +184,8 @@ src/ui/    React katmanı (çekirdeğe yalnız komut gönderir, snapshot okur)
   project.ts      JSON içe/dışa aktarma, otomatik kayıt
   editor/         Çizim alanı, kütüphane, özellikler, semboller, geometri, A* kablo yönlendirme,
                   sayfa düzeni, geri al/yinele destekli doküman reducer'ı
+  devices/        Modüllerin görünümleri (geometri, sembol, kontroller)
+  TrendPanel.tsx  Trend grafiği · TaskPanel.tsx  Görev ve otomatik denetim
 ```
 
 Dosya biçimi `version: 2`'dir. v0.2 dosyaları (`version: 1`) açılırken otomatik taşınır.

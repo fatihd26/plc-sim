@@ -65,6 +65,41 @@
   engellenir, çentik/home çubuğu boşlukları bırakılır. **Gerçek bir dokunmatik cihazda henüz test
   edilmedi** (yalnız Chrome mobil emülasyonu).
 
+## v0.4: bileşen kütüphanesi ve modül sistemi
+
+- [x] **Yeni bileşen eklemek 6-7 dosyaya dokunmayı gerektiriyordu.** Bileşenler artık modüldür
+  (`src/sim/modules/` + `src/ui/devices/`); çekirdek, katalog ve paneller onları kayıttan tanır.
+  Mevcut mekanik elemanlar (silindir, konveyör, fan, pompa) modüle taşındı.
+- [x] **Sayısal veri işlemleri yok.** MOVE, ADD, SUB, MUL, DIV, SCALE ve PID kutu komutları eklendi.
+- [x] **Analog G/Ç yok.** PLC'de 2 AI (0–10 V / 4–20 mA) ve 2 AQ (0–10 V); netler analog sinyal
+  taşır. ESP32 ADC1 ucuna bağlanan analog kaynak okunur (bağlı değilse kaydırıcı değeri).
+- [x] **Modbus slave yalnız ESP32.** Frekans konvertörü de Modbus RTU slave'dir.
+- [x] Sensörler, sürücüler, proses, pnömatik, hidrolik ve robotik bileşenler; arıza enjeksiyonu,
+  trend grafiği ve otomatik denetimli görevler eklendi.
+
+### v0.4 ile gelen sınırlar
+
+- [ ] **Analog devrede referans (0 V) çözülmez.** Analog çıkışın netine yazdığı değer, M ucunun
+  bağlı olup olmadığına bakılmadan okunur. Aynı nete iki analog kaynak bağlanırsa sinyal geçersiz
+  olur ama ayrıca uyarı verilmez.
+- [ ] **Akışkan modelleri basitleştirilmiştir.** Pnömatikte basınç düzeyi ve hava tüketimi yoktur
+  (hat ya basınçlı ya tahliyede ya kapalı); kısma valfi tahliye hattında hızı çarpanla düşürür
+  (meter-out). Hidrolikte yağ sıkıştırılamaz kabul edilir; debi en düşük basınç isteyen
+  aktüatöre gider, akümülatör, basınç düşümü ve sızıntı yoktur. Yerçekimiyle inen yük
+  modellenmez.
+- [ ] **Mekanizmalar kinematiktir.** Kütle, atalet ve kuvvet yalnız hidrolik basınç hesabında
+  vardır. Ekskavatör ve robot kolunun açı hesabı yalnız çizim içindir (çekirdek eklem konumlarını
+  tutar); sensörler sabit uç konumlarına bakar.
+- [ ] **Enkoder çözünürlüğü tick ile sınırlı değildir ama darbe seviyeleri öyledir.** HSC, enkoderin
+  toplam darbe sayısını doğrudan okur; DI LED'lerindeki A/B seviyesi yüksek hızda örtüşebilir.
+- [ ] **Bileşenler arası mekanik bağlantı yok.** Konveyörden düşen kutu pick & place'e geçmez;
+  her mekanizmanın kendi parça kaynağı vardır. Sensörler yalnız hedef olarak seçilen tek
+  mekanizmayı görür.
+- [ ] **Görev senaryosu dili doğrusal.** Döngü, değişken ve koşullu dallanma yoktur. Senaryo
+  öğrenciden gizlenmez (eğitim aracı; güvenlik hedeflenmez).
+- [ ] **Trend yalnız ekranda çizilen kareleri örnekler** (en sık 20 ms); duraklatılmış
+  simülasyonda adım adım ilerlerken her adım bir örnektir. Trend verisi dışa aktarılamaz.
+
 ## Kalan sınırlar (v0.3)
 
 - [ ] **Mantıksal çözücü akım hesaplamaz.** Kısa devre, aynı nette iki farklı potansiyel olarak
@@ -80,8 +115,7 @@
   set, reset; TON, TOF, TP, TONR zamanlayıcıları (T0..T15) ve CTU, CTD, CTUD sayıcıları (C0..C15).
   Komutlar ladder editörünün solundaki ayrı "PLC komutları" menüsünden sürüklenir veya tıklanır
   (şema kütüphanesinde yer almazlar; çizim alanına bırakılamazlar).
-- [ ] **Sayısal veri işlemleri yok.** %MW0..%MW63 kelime belleği var ve karşılaştırmada
-  okunabilir, Modbus holding register'larıyla yazılabilir; ama ladder'da MOVE ve aritmetik yok.
+- [x] **Sayısal veri işlemleri yok.** v0.4'te çözüldü (yukarıda).
 - [x] **Modbus master yok.** PLC, tarama tablosuyla RS485 üzerinden Modbus RTU master olarak
   çalışır (`sim/modbusMaster.ts`).
 - [ ] **Modbus kapsamı.** Yalnız ESP32 slave olabilir (PLC'ler arası Modbus yok), yalnız PLC

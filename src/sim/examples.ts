@@ -1,6 +1,20 @@
 import type { ContactType, LadderNode, LadderProgram, Network } from './ladder';
 import { startStopProgram } from './programs';
 import type { ModbusPoll } from './modbusMaster';
+import {
+  electroPneumaticSchematic,
+  elevatorSchematic,
+  excavatorSchematic,
+  furnaceSchematic,
+  garageDoorSchematic,
+  hydraulicPressSchematic,
+  pickPlaceSchematic,
+  pidTankSchematic,
+  positioningSchematic,
+  robotCellSchematic,
+  starDeltaSchematic,
+  vfdModbusSchematic,
+} from './examplesLib';
 import type { ComponentInstance, Schematic, Wire } from './schematic';
 
 let n = 0;
@@ -509,8 +523,21 @@ export function modbusSchematic(): Schematic {
   };
 }
 
+/** Arıza bulma: start-stop devresi, stop butonunun PLC girişine giden kablosu kopuk (gizli). */
+export function troubleshootSchematic(): Schematic {
+  const s = startStopSchematic();
+  s.title = 'Arıza bulma: motor çalışmıyor';
+  s.hideFaults = true;
+  const w = s.wires.find((x) => x.a.component === 'S2' && x.a.terminal === '12');
+  if (w) w.broken = true;
+  return s;
+}
+
+export type ExampleGroup = 'Temel' | 'Mekanik' | 'Analog ve proses' | 'Sürücüler' | 'Akışkan gücü' | 'Robotik' | 'Arıza bulma' | 'Görevler';
+
 export interface Example {
   id: string;
+  group: ExampleGroup;
   title: string;
   /** Ne öğrettiği ve önerilen alıştırma. */
   description: string;
@@ -521,6 +548,7 @@ export interface Example {
 export const EXAMPLES: Example[] = [
   {
     id: 'fan',
+    group: 'Temel',
     title: 'Fan: start-stop',
     description:
       'PLC çıkışı K1 rölesini sürer, röle kontağı 230 V fanı besler (yük PLC çıkışına doğrudan bağlanmaz). Alıştırma: ikinci bir fan ve rölesini ekleyin.',
@@ -528,12 +556,14 @@ export const EXAMPLES: Example[] = [
   },
   {
     id: 'start-stop',
+    group: 'Temel',
     title: 'Motor: start-stop',
     description: 'Kontaktör ve termik röleyle 3~ motor. Alıştırma: "motor çalışıyor" lambası ekleyin (PLC çıkışı → röle → lamba).',
     build: startStopSchematic,
   },
   {
     id: 'piston',
+    group: 'Mekanik',
     title: 'Pnömatik piston: tek çevrim',
     description:
       "İleri uç sensörü pistonu geri döndürür. Alıştırma: geri sensörünü (I0.3) kullanarak stop'a basılana kadar sürekli ileri-geri çalıştırın.",
@@ -541,6 +571,7 @@ export const EXAMPLES: Example[] = [
   },
   {
     id: 'conveyor',
+    group: 'Mekanik',
     title: 'Konveyör: fotoselde dur',
     description:
       'Kutu fotosele gelince bant durur, start kutuyu gönderir. Alıştırma: bant çalışırken yanan yeşil bir "Bant çalışıyor" lambası (Q0.2) ekleyin; lambayı bir röle üzerinden besleyin.',
@@ -548,6 +579,7 @@ export const EXAMPLES: Example[] = [
   },
   {
     id: 'tank',
+    group: 'Mekanik',
     title: 'Depo seviye kontrolü',
     description:
       'Otomatik modda alt seviyede pompa başlar, üst seviyede durur. Alıştırma: alt sensör kuruyken alarm lambası yakın (röle üzerinden).',
@@ -555,6 +587,7 @@ export const EXAMPLES: Example[] = [
   },
   {
     id: 'timer-counter',
+    group: 'Temel',
     title: 'Zamanlayıcı ve sayıcı',
     description:
       'S1 basışları CTU ile sayılır, sayım sürerken P2 iki TON ile yanıp söner, 3. basıştan 2 s sonra P1 set edilir; S2 reset eder. Alıştırma: P1 yandıktan 5 s sonra kendiliğinden sönsün (TP veya TOF).',
@@ -562,6 +595,7 @@ export const EXAMPLES: Example[] = [
   },
   {
     id: 'esp32',
+    group: 'Temel',
     title: 'ESP32 I/O kartı',
     description:
       'ESP32 ladder ile programlanır: S1 (GPIO16) bırakıldıktan 2 s sonra P1 söner (TOF), ADC1 5 V üstünde P2 yanar. Programı alt panelden düzenleyin, ADC1\'i Özellikler panelindeki kaydırıcıyla değiştirin. Alıştırma: GPIO17\'ye ikinci bir buton bağlayıp P1\'i sayıcıyla 3 basışta yakın.',
@@ -569,9 +603,114 @@ export const EXAMPLES: Example[] = [
   },
   {
     id: 'modbus',
+    group: 'Temel',
     title: 'PLC ↔ ESP32 Modbus RTU',
     description:
       'PLC master, ESP32 slave: S1 (PLC) ESP32\'nin P1 lambasını, S2 (ESP32) PLC\'nin P2 lambasını yakar; ESP32 ADC değeri %MW10\'a okunur. Modbus tablosunu PLC programı panelindeki "Modbus" düğmesinden açın. Alıştırma: RS485 A/B kablolarını ters bağlayın ve zaman aşımını gözleyin.',
     build: modbusSchematic,
+  },
+  {
+    id: 'pid-tank',
+    group: 'Analog ve proses',
+    title: 'PID seviye kontrolü',
+    description:
+      'Seviye transmitteri (AI0) ve set potansiyometresi (AI1) PID kutusuna girer, %QW0 oransal vanayı sürer. Tankın tüketimini Özellikler panelinden değiştirip kontrolörün telafisini izleyin. Alıştırma: KP ve TI değerlerini değiştirip aşım ve oturma süresini karşılaştırın.',
+    build: pidTankSchematic,
+  },
+  {
+    id: 'furnace',
+    group: 'Analog ve proses',
+    title: 'Fırın: aç-kapa sıcaklık kontrolü',
+    description:
+      'PT100 transmitteri 4–20 mA ile okunur, SCALE ile °C\'ye çevrilir; 180–200 °C histerezis bandında röle ısıtıcıyı açıp kapar. Alıştırma: kapağı açınca (fırına tıklayın) ısınma süresinin nasıl değiştiğini gözleyin; sıcaklık 250 °C\'yi geçerse alarm biti (%M) set edin.',
+    build: furnaceSchematic,
+  },
+  {
+    id: 'star-delta',
+    group: 'Sürücüler',
+    title: 'Yıldız-üçgen yol verme',
+    description:
+      'K1 ana, K2 yıldız, K3 üçgen kontaktörü; T0 (4 s) sonra yıldızdan üçgene geçilir. Motor akımını Özellikler panelinde izleyin: yıldızda 1/3. Alıştırma: K2 ve K3 arasına 100 ms geçiş beklemesi ekleyin.',
+    build: starDeltaSchematic,
+  },
+  {
+    id: 'vfd-modbus',
+    group: 'Sürücüler',
+    title: 'VFD: Modbus ile hız kontrolü',
+    description:
+      'PLC, frekans konvertörüne FC16 ile kontrol kelimesi (HR0) ve frekans referansını (HR1) yazar, FC3 ile çıkış frekansını %MW10\'a okur. Hız potansiyometreyle ayarlanır. Alıştırma: S1/S2 ile yön değiştirme ekleyin (HR0 bit1).',
+    build: vfdModbusSchematic,
+  },
+  {
+    id: 'electro-pneumatic',
+    group: 'Akışkan gücü',
+    title: 'Elektro-pnömatik: tek çevrim',
+    description:
+      'Hava kaynağı → 5/2 valf → kısma valfi → çift etkili silindir. Hortumlar basınçlıyken kalın çizilir. Kısma açıklığını değiştirip ileri gitme hızını izleyin. Alıştırma: ikinci bir silindirle A+ B+ A− B− dizisini kurun.',
+    build: electroPneumaticSchematic,
+  },
+  {
+    id: 'hydraulic-press',
+    group: 'Akışkan gücü',
+    title: 'Hidrolik pres: basınç sınırlı',
+    description:
+      'Güç ünitesi + tandem merkezli 4/3 valf + silindir. S3 pompayı çalıştırır, S1 pres çevrimini başlatır: silindir iner, uçta basınç yükselir; transmitter 100 bar\'ı görünce valf orta konuma döner ve Q0.3 "tamam" olur. S2 yukarı. Alıştırma: Q0.3\'e röle üzerinden "pres tamam" lambası bağlayın.',
+    build: hydraulicPressSchematic,
+  },
+  {
+    id: 'excavator',
+    group: 'Akışkan gücü',
+    title: 'Kepçe: elle hidrolik kumanda',
+    description:
+      'Üç 4/3 valf, butonlarla doğrudan sürülür (bom, arm, kova). Bomu indirin, armı uzatın, kovayı açıp kapatarak kazın, bomu kaldırıp boşaltın. Alıştırma: PLC ve sınır sensörleriyle otomatik kazı çevrimi yazın.',
+    build: excavatorSchematic,
+  },
+  {
+    id: 'positioning',
+    group: 'Robotik',
+    title: 'Konumlama: enkoder + HSC',
+    description:
+      'Eksen enkoderi PLC\'nin HC0 hızlı sayıcısına (A/B kuadratür) bağlı. S2 referansa götürür ve sayıcıyı sıfırlar, S1 800 darbede (400 mm) durdurur. Alıştırma: hedefe yaklaşınca yavaşlamak için VFD ekleyin.',
+    build: positioningSchematic,
+  },
+  {
+    id: 'pick-place',
+    group: 'Robotik',
+    title: 'Pick & place: otomatik çevrim',
+    description:
+      'Elektro-pnömatik portal parçayı alır ve kutuya koyar; sensörlerle kilitlemeli sıralama (Z aşağıdayken X hareketi yok). Alıştırma: yerleştirilen parçaları CTU ile sayıp 5\'te duran bir çevrim yapın.',
+    build: pickPlaceSchematic,
+  },
+  {
+    id: 'robot-cell',
+    group: 'Robotik',
+    title: 'Robot hücresi: el sıkışma',
+    description:
+      'PLC, robota START ve program numarasını verir; robot READY / BUSY / DONE / FAULT ile yanıtlar. Alıştırma: S1\'e basmadan sürekli çalışan otomatik mod ve program 2 (A→C) seçimi ekleyin.',
+    build: robotCellSchematic,
+  },
+  {
+    id: 'elevator',
+    group: 'Robotik',
+    title: 'Asansör: 3 kat',
+    description:
+      'Kat çağrıları hafızaya alınır, son geçilen kat hatırlanır, yön kontaktörleri karşılıklı kilitlidir. Alıştırma: her kat için çağrı lambası ve kapı bekleme süresi (TON) ekleyin.',
+    build: elevatorSchematic,
+  },
+  {
+    id: 'garage-door',
+    group: 'Robotik',
+    title: 'Garaj kapısı: engel algılamalı',
+    description:
+      'Kapanırken fotosel kesilirse kapı geri açılır. Kapının altına tıklayarak engel koyun. Alıştırma: tam açıkta 10 s bekleyip kendiliğinden kapanma ekleyin.',
+    build: garageDoorSchematic,
+  },
+  {
+    id: 'troubleshoot',
+    group: 'Arıza bulma',
+    title: 'Arıza bulma: motor çalışmıyor',
+    description:
+      'Devrede gizli bir arıza var: start\'a basınca motor çalışmıyor. Simülasyonda kablo potansiyellerini ve PLC giriş LED\'lerini izleyerek arızayı bulun (Özellikler › Proje\'den gizlemeyi kapatınca cevap görünür).',
+    build: troubleshootSchematic,
   },
 ];

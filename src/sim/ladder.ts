@@ -6,21 +6,31 @@
 //   Çıkışlar    bobin ( ), ters bobin (/), set (S), reset (R)
 //   Zamanlayıcı TON (çekmede gecikmeli), TOF (bırakmada gecikmeli), TP (darbe), TONR (kalıcı TON)
 //   Sayıcı      CTU (yukarı), CTD (aşağı), CTUD (yukarı/aşağı)
+//   Kutular     MOVE, ADD, SUB, MUL, DIV, SCALE, PID (boxes.ts)
 
 import {
+  AI_COUNT,
+  AQ_COUNT,
   FUNC_COUNT,
+  HSC_COUNT,
   MW_COUNT,
   formatOperand,
+  formatWord,
   isFunc,
   parseAddress,
+  parseDest,
   parseFunc,
+  parseHc,
   parseOperand,
   parseValue,
   type BitAddress,
   type BitOperand,
   type FuncAddress,
+  type HcAddress,
   type ValueOperand,
+  type WordAddress,
 } from './address';
+import { BOX_SPECS, BOX_TYPES, evalBox, isBox, newPidState, type BoxType, type PidState } from './boxes';
 
 export type ContactType = 'NO' | 'NC' | 'P' | 'N';
 export type CompareOp = '==' | '<>' | '>' | '>=' | '<' | '<=';
@@ -35,7 +45,8 @@ export type LadderNode =
 export type BitCoilType = 'coil' | 'ncoil' | 'set' | 'reset';
 export type TimerType = 'TON' | 'TOF' | 'TP' | 'TONR';
 export type CounterType = 'CTU' | 'CTD' | 'CTUD';
-export type CoilType = BitCoilType | TimerType | CounterType;
+export type CoilType = BitCoilType | TimerType | CounterType | BoxType;
+export { isBox, BOX_TYPES, type BoxType };
 
 export const TIMER_TYPES: TimerType[] = ['TON', 'TOF', 'TP', 'TONR'];
 export const COUNTER_TYPES: CounterType[] = ['CTU', 'CTD', 'CTUD'];
@@ -56,6 +67,8 @@ export interface Coil {
   reset?: string;
   load?: string;
   down?: string;
+  /** Kutu komutlarının girişleri (BOX_SPECS'teki anahtarlarla: IN, IN1, PV, SP...). */
+  args?: Record<string, string>;
 }
 
 export interface Network {
@@ -113,6 +126,13 @@ export interface Runtime {
   edges: Record<string, boolean>;
   /** %MW kelime belleği (Modbus holding register'ları). */
   words: Uint16Array;
+  /** Analog girişler (%IW, scan başında okunur) ve çıkışlar (%QW). */
+  iw: number[];
+  qw: number[];
+  /** Hızlı sayıcı değerleri (HC); donanım her tick günceller. */
+  hc: number[];
+  /** PID kutularının durumu (çıkış eleman kimliğine göre). */
+  pid: Record<string, PidState>;
 }
 
 export function createRuntime(): Runtime {
@@ -128,6 +148,10 @@ export function createRuntime(): Runtime {
     })),
     edges: {},
     words: new Uint16Array(MW_COUNT),
+    iw: new Array<number>(AI_COUNT).fill(0),
+    qw: new Array<number>(AQ_COUNT).fill(0),
+    hc: new Array<number>(HSC_COUNT).fill(0),
+    pid: {},
   };
 }
 
@@ -160,6 +184,8 @@ type CompiledNode =
 
 type CompiledOutput =
   | { kind: 'bit'; type: BitCoilType; addr: BitOperand }
+  | { kind: 'resetHc'; hc: HcAddress }
+  | { kind: 'box'; type: BoxType; out: WordAddress; args: ValueOperand[] }
   | { kind: 'timer'; type: TimerType; index: number; preset: number; reset?: BitOperand }
   | { kind: 'counter'; type: CounterType; index: number; preset: number; reset?: BitOperand; load?: BitOperand; down?: BitOperand };
 
@@ -185,10 +211,12 @@ const COIL_NAMES: Record<CoilType, string> = {
   CTU: 'CTU',
   CTD: 'CTD',
   CTUD: 'CTUD',
+  ...(Object.fromEntries(BOX_TYPES.map((t) => [t, BOX_SPECS[t].title])) as Record<BoxType, string>),
 };
 
 /** Çıkış adresinin türe uygunluğunu denetler; uygunsa normal biçimini döndürür. */
 export function checkOutputAddress(type: CoilType, text: string): string {
+  if (isBox(type)) return formatWord(parseDest(text));
   if (isTimer(type) || isCounter(type)) {
     const area = isTimer(type) ? 'T' : 'C';
     const f = parseFunc(text);
@@ -196,6 +224,8 @@ export function checkOutputAddress(type: CoilType, text: string): string {
     return formatOperand(f);
   }
   if (type === 'reset') {
+    const hc = parseHc(text);
+    if (hc) return `HC${hc.index}`;
     const op = parseOperand(text);
     if (op.area === 'I') throw new Error('Reset giriş alanına (%I) yazamaz');
     return formatOperand(op);
@@ -209,6 +239,21 @@ export function checkOutputAddress(type: CoilType, text: string): string {
 function compileOutput(coil: Coil): CompiledOutput {
   const type = coil.type ?? 'coil';
   checkOutputAddress(type, coil.address);
+  if (isBox(type)) {
+    const args = BOX_SPECS[type].args.map((a) => {
+      const text = coil.args?.[a.key] ?? a.default;
+      try {
+        return parseValue(text);
+      } catch (e) {
+        throw new Error(`${type} ${a.key}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    });
+    return { kind: 'box', type, out: parseDest(coil.address), args };
+  }
+  if (type === 'reset') {
+    const hc = parseHc(coil.address);
+    if (hc) return { kind: 'resetHc', hc };
+  }
   const optional = (text: string | undefined, what: string) => {
     if (!text) return undefined;
     try {
@@ -285,9 +330,29 @@ function readOperand(ctx: Ctx, op: BitOperand): boolean {
 }
 
 function readValue(ctx: Ctx, op: ValueOperand): number {
-  if (op.area === 'K') return op.value;
-  if (op.area === 'MW') return ctx.rt.words[op.index]!;
-  return op.area === 'T' ? ctx.rt.timers[op.index]!.et : ctx.rt.counters[op.index]!.cv;
+  switch (op.area) {
+    case 'K':
+      return op.value;
+    case 'MW':
+      return ctx.rt.words[op.index]!;
+    case 'IW':
+      return ctx.rt.iw[op.index]!;
+    case 'QW':
+      return ctx.rt.qw[op.index]!;
+    case 'HC':
+      return ctx.rt.hc[op.index]!;
+    case 'T':
+      return ctx.rt.timers[op.index]!.et;
+    case 'C':
+      return ctx.rt.counters[op.index]!.cv;
+  }
+}
+
+/** Kelimeye yazar: %MW 0..65535, %QW −32768..32767 aralığına kırpılır. */
+function writeWord(rt: Runtime, w: WordAddress, value: number): void {
+  const v = Math.round(value);
+  if (w.area === 'MW') rt.words[w.index] = Math.max(0, Math.min(0xffff, v));
+  else if (w.area === 'QW') rt.qw[w.index] = Math.max(-32768, Math.min(32767, v));
 }
 
 function compare(op: CompareOp, a: number, b: number): boolean {
@@ -421,6 +486,20 @@ function runOutput(net: CompiledNetwork, power: boolean, ctx: Ctx, write: BitWri
   const out = net.out;
   const bit = (op: BitOperand | undefined) => (op ? readOperand(ctx, op) : false);
   switch (out.kind) {
+    case 'resetHc':
+      if (power) ctx.rt.hc[out.hc.index] = 0;
+      return { powerIn: power, powerOut: power };
+    case 'box': {
+      if (!power) {
+        if (out.type === 'PID') delete ctx.rt.pid[net.coilId];
+        return { powerIn: false, powerOut: false };
+      }
+      const pid = out.type === 'PID' ? (ctx.rt.pid[net.coilId] ??= newPidState()) : null;
+      const result = evalBox(out.type, out.args.map((a) => readValue(ctx, a)), pid, dt);
+      if (result === null) return { powerIn: true, powerOut: false };
+      writeWord(ctx.rt, out.out, result);
+      return { powerIn: true, powerOut: true, value: result };
+    }
     case 'bit': {
       const addr = out.addr;
       if (out.type === 'reset') {

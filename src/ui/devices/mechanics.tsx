@@ -1,25 +1,12 @@
-// Mekanik elemanların animasyonlu sembolleri (yerel koordinat; geometry.ts ile aynı ölçüler).
+// Mekanik elemanlar (silindir, konveyör, fan, pompa): animasyonlu semboller ve görünüm tanımları.
 // Durum verilmezse (düzenleme modu, kütüphane önizlemesi) dinlenme konumunda çizilir.
 
 import { numParam, strParam } from '../../sim/catalog';
 import type { ComponentState } from '../../sim/simulation';
-import type { SymbolInstance } from './symbols';
+import { bottom, motorClass, Rotor, top } from './common';
+import { defineView, type SymbolInstance } from './types';
 
 type State<T extends ComponentState['type']> = (ComponentState & { type: T }) | undefined;
-
-/** Dönen rotor işaretleri (motor sembolündeki gibi). */
-function Rotor({ cx, cy, r, angle }: { cx: number; cy: number; r: number; angle: number }) {
-  return (
-    <g transform={`rotate(${angle} ${cx} ${cy})`} className="rotor">
-      {[0, 120, 240].map((a) => (
-        <path key={a} d={`M ${cx} ${cy - r} l -3 4 h 6 Z`} transform={`rotate(${a} ${cx} ${cy})`} />
-      ))}
-    </g>
-  );
-}
-
-const motorClass = (s: { powered: boolean; speed: number } | undefined) =>
-  s?.powered ? 'motor powered' : s && s.speed !== 0 ? 'motor coasting' : 'motor';
 
 // --- Pnömatik silindir --------------------------------------------------------------------
 
@@ -73,7 +60,7 @@ export function CylinderBody({ inst, s }: { inst: SymbolInstance; s: State<'cyli
 /** Bandın kutu taşıyan kısmı: 82..250. Çizgi deseninin periyodu (12) uzunluğu tam böler. */
 const BELT = { x0: 82, len: 168, top: 54, bottom: 70 };
 
-export function ConveyorBody({ s }: { s: State<'conveyor'> }) {
+export function ConveyorBody({ s }: { inst: SymbolInstance; s: State<'conveyor'> }) {
   const boxLen = (s?.boxLength ?? 0.12) * BELT.len;
   const sensorX = BELT.x0 + (s?.sensorAt ?? 0.76) * BELT.len;
   const beltShift = (s?.beltPos ?? 0) * BELT.len;
@@ -111,7 +98,7 @@ export function ConveyorBody({ s }: { s: State<'conveyor'> }) {
       ))}
       {/* Kutular */}
       {s?.boxes.map((p, i) => (
-        <g key={i} className="crate">
+        <g key={i} className={s.boxMetal[i] ? 'crate metal' : 'crate'}>
           <rect x={BELT.x0 + p * BELT.len} y={BELT.top - 18} width={boxLen} height={18} rx={1.5} />
           <path
             d={`M ${BELT.x0 + p * BELT.len + 3} ${BELT.top - 9} h ${boxLen - 6}`}
@@ -205,3 +192,49 @@ export function PumpBody({ inst, s }: { inst: SymbolInstance; s: State<'pump'> }
     </g>
   );
 }
+
+// --- Görünüm tanımları ----------------------------------------------------------------------
+
+export const cylinderView = defineView<NonNullable<State<'cylinder'>>>({
+  type: 'cylinder',
+  geometry: {
+    w: 240,
+    h: 80,
+    terminals: [top('A1', 20), top('A2', 40), bottom('13', 70, 80), bottom('14', 90, 80), bottom('23', 120, 80), bottom('24', 140, 80)],
+  },
+  Body: CylinderBody,
+});
+
+export const conveyorView = defineView<NonNullable<State<'conveyor'>>>({
+  type: 'conveyor',
+  geometry: { w: 260, h: 80, terminals: [top('U', 20), top('V', 40), top('W', 60), top('13', 200), top('14', 220)] },
+  Body: ConveyorBody,
+  click: { action: 'addBox' },
+  controls: [{ kind: 'button', label: 'Kutu ekle', action: 'addBox' }],
+});
+
+export const fanView = defineView<NonNullable<State<'fan'>>>({
+  type: 'fan',
+  geometry: { w: 60, h: 80, terminals: [top('X1', 20), top('X2', 40)] },
+  Body: FanBody,
+});
+
+export const pumpView = defineView<NonNullable<State<'pump'>>>({
+  type: 'pump',
+  geometry: {
+    w: 200,
+    h: 140,
+    terminals: [
+      top('U', 20),
+      top('V', 40),
+      top('W', 60),
+      ...[['23', 40], ['24', 60], ['13', 100], ['14', 120]].map(([name, y]) => ({
+        name: name as string,
+        x: 200,
+        y: y as number,
+        dir: 'right' as const,
+      })),
+    ],
+  },
+  Body: PumpBody,
+});

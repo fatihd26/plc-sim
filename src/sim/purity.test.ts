@@ -1,17 +1,21 @@
 import { readdirSync, readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-// Çekirdek UI'dan bağımsız ve deterministik kalmalı.
+// Çekirdek UI'dan bağımsız ve deterministik kalmalı (modules/ dahil).
 const FORBIDDEN: [RegExp, string][] = [
   [/from ['"]react/, 'React bağımlılığı'],
   [/\b(window|document|requestAnimationFrame)\b/, 'DOM erişimi'],
   [/Math\.random|Date\.now|performance\.now/, 'deterministik olmayan kaynak'],
-  [/Math\.(exp|pow|sin|cos|tan|log)\b/, 'motorlar arası farklı sonuç verebilen Math fonksiyonu'],
+  [/Math\.(exp|pow|sin|cos|tan|atan2?|acos|asin|log|hypot|cbrt)\b/, 'motorlar arası farklı sonuç verebilen Math fonksiyonu'],
 ];
 
 const dir = import.meta.dirname;
-const sources = readdirSync(dir).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
+const walk = (d: string): string[] =>
+  readdirSync(d, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? walk(join(d, e.name)) : [join(d, e.name)]));
+const sources = walk(dir)
+  .filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'))
+  .map((f) => relative(dir, f));
 
 describe('çekirdek saflığı', () => {
   it.each(sources)('%s yasak API kullanmaz', (file) => {

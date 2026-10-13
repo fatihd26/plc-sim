@@ -3,7 +3,8 @@
 
 import { useState, type DragEvent, type ReactNode } from 'react';
 import { INSTR_MIME } from '../sim/instructions';
-import { isCounter, isTimer, type Coil, type LadderNode, type LadderTrace, type Network } from '../sim/ladder';
+import { BOX_SPECS } from '../sim/boxes';
+import { isBox, isCounter, isTimer, type Coil, type LadderNode, type LadderTrace, type Network } from '../sim/ladder';
 import { symbolName, type SymbolTable } from '../sim/symbolTable';
 
 const CW = 120; // hücre genişliği
@@ -177,6 +178,12 @@ const COIL_MARK: Record<string, string> = { ncoil: '/', set: 'S', reset: 'R' };
 /** Zamanlayıcı/sayıcı kutusunun satırları: ön ayar, anlık değer ve ek girişler. */
 function boxLines(coil: Coil, value: number | undefined): string[] {
   const live = value === undefined ? '—' : null;
+  if (isBox(coil.type)) {
+    const spec = BOX_SPECS[coil.type];
+    const lines = spec.args.map((a) => `${a.key} ${coil.args?.[a.key] ?? a.default}`);
+    lines.push(`OUT ${coil.address}${live ? '' : ` = ${value}`}`);
+    return lines;
+  }
   if (isTimer(coil.type)) {
     const lines = [`PT ${formatMs(coil.preset ?? 0)}`, `ET ${live ?? formatMs(value!)}`];
     if (coil.type === 'TONR') lines.push(`R ${coil.reset ?? '—'}`);
@@ -198,13 +205,13 @@ function NetworkView({ network, ctx }: { network: Network; ctx: Ctx }) {
   const st = ctx.trace[coil.id];
   const powerIn = st?.powerIn ?? false;
   const coilOn = st?.powerOut ?? false;
-  const isBox = isTimer(coil.type) || isCounter(coil.type);
-  const lines = isBox ? boxLines(coil, st?.value) : [];
+  const boxed = isTimer(coil.type) || isCounter(coil.type) || isBox(coil.type);
+  const lines = boxed ? boxLines(coil, st?.value) : [];
   const boxH = 22 + lines.length * 13;
   const coilX = px(size.w) + CW / 2;
   const y = cy(0);
   const width = px(size.w + 1) + RAIL;
-  const height = Math.max(size.h * CH, isBox ? y + boxH + 40 : 0) + 16;
+  const height = Math.max(size.h * CH, boxed ? y + boxH + 40 : 0) + 16;
   const pick = ctx.onSelect;
   const mark = COIL_MARK[coil.type ?? 'coil'];
 
@@ -228,7 +235,7 @@ function NetworkView({ network, ctx }: { network: Network; ctx: Ctx }) {
           {pick && (
             <rect x={coilX - CW / 2 + 4} y={y - 34} width={CW - 8} height={Math.max(CH - 14, boxH + 30)} className="pick" />
           )}
-          {isBox ? (
+          {boxed ? (
             <>
               <Wire x1={px(size.w)} y1={y} x2={coilX - 42} y2={y} on={powerIn} />
               <rect x={coilX - 42} y={y - 16} width={84} height={boxH} rx={3} className={`box${coilOn ? ' on' : ''}`} />
@@ -242,7 +249,7 @@ function NetworkView({ network, ctx }: { network: Network; ctx: Ctx }) {
               ))}
               <Wire x1={coilX + 42} y1={y} x2={width - RAIL} y2={y} on={coilOn} />
               <text x={coilX} y={y - 22} className="addr">
-                {coil.address}
+                {isBox(coil.type) ? '' : coil.address}
               </text>
               {coil.label && (
                 <text x={coilX} y={y + boxH + 10} className="comment">

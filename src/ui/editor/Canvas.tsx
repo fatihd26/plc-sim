@@ -14,7 +14,7 @@ import {
   type MouseEvent,
   type PointerEvent,
 } from 'react';
-import type { ComponentType, CustomDef } from '../../sim/catalog';
+import { terminalDomain, type ComponentType, type CustomDef } from '../../sim/catalog';
 import type { NetPotential } from '../../sim/netlist';
 import { pagesOf, terminalKey, type ComponentInstance, type Schematic, type TerminalRef } from '../../sim/schematic';
 import type { SimSnapshot } from '../../sim/simulation';
@@ -32,6 +32,7 @@ import {
 import { boxSelect, pageContent, routePage, SHEET, xrefTargets, type BoxSelect } from './layout';
 import { dragSegment, manualRoute, nearestOnPath, orthoJoin, route, stubPoint, toPath, type Endpoint } from './routing';
 import { SymbolBody } from './symbols';
+import { viewOf } from '../devices';
 
 export const DRAG_MIME = 'application/x-plcsim-component';
 
@@ -91,12 +92,31 @@ const WIRE_HIT = 6;
 const potentialClass = (p: NetPotential | undefined) => (p ? `p-${p}` : '');
 
 const MOMENTARY = new Set<ComponentType>(['buttonNO', 'buttonNC']);
-/** Her tıklamada onToggle: kilitlemeli elemanlar durum değiştirir, konveyöre kutu konur. */
-const LATCHING = new Set<ComponentType>(['estop', 'breaker3', 'fuse', 'conveyor']);
+/** Her tıklamada onToggle: kilitlemeli elemanlar durum değiştirir, modüller tıklama eylemini alır. */
+const LATCHING = new Set<ComponentType>(['estop', 'breaker3', 'fuse']);
 const hasPush = (c: ComponentInstance) =>
   c.type === 'custom' && !!c.custom?.poles.some((p) => p.kind === 'pushNO' || p.kind === 'pushNC');
-const isMomentary = (c: ComponentInstance) => MOMENTARY.has(c.type) || hasPush(c);
-const isInteractive = (c: ComponentInstance) => isMomentary(c) || LATCHING.has(c.type);
+const isMomentary = (c: ComponentInstance) => MOMENTARY.has(c.type) || hasPush(c) || viewOf(c.type)?.click === 'hold';
+const isLatching = (c: ComponentInstance) => {
+  const click = viewOf(c.type)?.click;
+  return LATCHING.has(c.type) || (!!click && click !== 'hold');
+};
+const isInteractive = (c: ComponentInstance) => isMomentary(c) || isLatching(c);
+
+/** Kablonun fiziksel alanı ve akışkan hattının durumu için CSS sınıfları. */
+function wireClass(schematic: Schematic, w: Schematic['wires'][number], snapshot: SimSnapshot | null): string {
+  const c = schematic.components.find((x) => x.id === w.a.component);
+  const other = schematic.components.find((x) => x.id === w.b.component);
+  const end = c?.type === 'junction' && other ? { c: other, t: w.b.terminal } : c ? { c, t: w.a.terminal } : null;
+  const domain = end ? terminalDomain(end.c, end.t) : 'electric';
+  let cls = domain === 'electric' ? '' : ` hose ${domain}`;
+  if (domain !== 'electric' && snapshot) {
+    const f = snapshot.fluid[`${w.a.component}:${w.a.terminal}`] ?? snapshot.fluid[`${w.b.component}:${w.b.terminal}`];
+    if (f) cls += ` f-${f}`;
+  }
+  if (snapshot?.signals[`${w.a.component}:${w.a.terminal}`]) cls += ' signal';
+  return cls;
+}
 
 /** Kablonun sürüklenebilir parçalarını bulmak için: terminal ve çıkış payı noktaları açıkça yer alır. */
 function withStubs(path: Point[], a: Endpoint, b: Endpoint): Point[] {
@@ -343,7 +363,7 @@ export function Canvas(props: Props) {
       const c = id ? byId.get(id) : undefined;
       if (c) {
         dispatch({ type: 'select', selection: selectComponent(c.id) });
-        if (LATCHING.has(c.type)) {
+        if (isLatching(c)) {
           props.onToggle(c.id);
         } else if (isMomentary(c)) {
           if (running) {
@@ -579,6 +599,7 @@ export function Canvas(props: Props) {
     if (!pts) return null;
     const selected = selWires.has(w.id);
     const pot = potentials?.[terminalKey(w.a)];
+    const broken = snapshot ? snapshot.brokenWires.includes(w.id) && !schematic.hideFaults : !!w.broken;
     let handles: [Point, Point][] = [];
     if (mode === 'edit' && one?.kind === 'wire' && one.id === w.id && gesture.kind !== 'segment') {
       const ca = byId.get(w.a.component);
@@ -594,10 +615,15 @@ export function Canvas(props: Props) {
       <g
         key={w.id}
         data-wire={w.id}
-        className={`wire ${potentialClass(pot)}${selected ? ' selected' : ''}${w.points ? ' manual' : ''}`}
+        className={`wire ${potentialClass(pot)}${wireClass(schematic, w, snapshot)}${broken ? ' broken' : ''}${selected ? ' selected' : ''}${w.points ? ' manual' : ''}`}
       >
         <path d={toPath(pts)} className="wire-hit" />
         <path d={toPath(pts)} className="wire-line" />
+        {broken && pts.length > 1 && (
+          <text x={(pts[0]!.x + pts[1]!.x) / 2} y={(pts[0]!.y + pts[1]!.y) / 2 + 4} className="break-mark">
+            ✕
+          </text>
+        )}
         {selected &&
           [pts[0]!, pts[pts.length - 1]!].map((t, i) => (
             <rect key={i} x={t.x - 3} y={t.y - 3} width={6} height={6} className="grip" />

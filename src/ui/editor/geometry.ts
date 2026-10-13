@@ -2,7 +2,8 @@
 // Terminal adları çekirdek kataloğuyla birebir eşleşmelidir (editor.test.ts denetler).
 // Kullanıcı tanımlı bileşenlerin geometrisi tanımlarından türetilir.
 
-import { CATALOG, PLC_DI, PLC_DQ, terminalsOf, type ComponentType, type CustomDef } from '../../sim/catalog';
+import { CATALOG, PLC_AI, PLC_AQ, PLC_DI, PLC_DQ, terminalsOf, type ComponentType, type CoreType, type CustomDef } from '../../sim/catalog';
+import { viewOf } from '../devices';
 import type { ComponentInstance, Point, Rotation, TerminalRef } from '../../sim/schematic';
 
 export type { Point };
@@ -25,7 +26,8 @@ export interface SymbolGeo {
   terminals: TerminalGeo[];
 }
 
-type BuiltinType = Exclude<ComponentType, 'custom'>;
+/** Çizimi bu dosyada olan çekirdek tipler (modüllerin geometrisi görünümlerindedir). */
+type BuiltinType = Exclude<CoreType, 'custom'>;
 
 const top = (name: string, x: number): TerminalGeo => ({ name, x, y: 0, dir: 'up' });
 const bottom = (name: string, x: number, h: number): TerminalGeo => ({ name, x, y: h, dir: 'down' });
@@ -79,29 +81,6 @@ export const GEOMETRY: Record<BuiltinType, SymbolGeo> = {
     ],
   },
   motor3: { w: 80, h: 80, terminals: [top('U', 20), top('V', 40), top('W', 60)] },
-  // Mekanik elemanlar: sensör terminalleri sensörün çizildiği yere yakın durur.
-  cylinder: {
-    w: 240,
-    h: 80,
-    terminals: [top('A1', 20), top('A2', 40), bottom('13', 70, 80), bottom('14', 90, 80), bottom('23', 120, 80), bottom('24', 140, 80)],
-  },
-  conveyor: { w: 260, h: 80, terminals: [top('U', 20), top('V', 40), top('W', 60), top('13', 200), top('14', 220)] },
-  fan: { w: 60, h: 80, terminals: [top('X1', 20), top('X2', 40)] },
-  pump: {
-    w: 200,
-    h: 140,
-    terminals: [
-      top('U', 20),
-      top('V', 40),
-      top('W', 60),
-      ...[['23', 40], ['24', 60], ['13', 100], ['14', 120]].map(([name, y]): TerminalGeo => ({
-        name: name as string,
-        x: 200,
-        y: y as number,
-        dir: 'right',
-      })),
-    ],
-  },
   esp32: {
     w: 160,
     h: 100,
@@ -127,6 +106,8 @@ export const GEOMETRY: Record<BuiltinType, SymbolGeo> = {
       ...PLC_DQ.map((n, i) => bottom(n, 60 + i * 20, 100)),
       { name: 'RS485_A', x: 220, y: 40, dir: 'right' },
       { name: 'RS485_B', x: 220, y: 60, dir: 'right' },
+      // Analog modül sol yanda: girişler üstte, çıkışlar altta
+      ...[...PLC_AI, ...PLC_AQ].map((name, i): TerminalGeo => ({ name, x: 0, y: 20 + i * 20, dir: 'left' })),
     ],
   },
 };
@@ -144,8 +125,11 @@ export function customGeometry(def: CustomDef | undefined): SymbolGeo {
 
 type GeoInstance = Pick<ComponentInstance, 'type' | 'custom'>;
 
+const MISSING: SymbolGeo = { w: 40, h: 40, terminals: [] };
+
 export function geometryOf(inst: GeoInstance): SymbolGeo {
-  return inst.type === 'custom' ? customGeometry(inst.custom) : GEOMETRY[inst.type];
+  if (inst.type === 'custom') return customGeometry(inst.custom);
+  return GEOMETRY[inst.type as BuiltinType] ?? viewOf(inst.type)?.geometry ?? MISSING;
 }
 
 const DIR_VEC: Record<Dir, Point> = { up: { x: 0, y: -1 }, down: { x: 0, y: 1 }, left: { x: -1, y: 0 }, right: { x: 1, y: 0 } };
@@ -232,13 +216,16 @@ export const rectContains = (outer: Rect, inner: Rect) =>
 /** Katalog ile geometri tutarlılığı: eksik/fazla terminal adlarını döndürür. */
 export function geometryMismatches(): string[] {
   const out: string[] = [];
-  for (const type of Object.keys(GEOMETRY) as BuiltinType[]) {
-    const geo = GEOMETRY[type].terminals.map((t) => t.name).sort();
+  for (const type of Object.keys(CATALOG) as ComponentType[]) {
+    if (type === 'custom') continue;
+    const g = GEOMETRY[type as BuiltinType] ?? viewOf(type)?.geometry;
+    if (!g) continue;
+    const geo = g.terminals.map((t) => t.name).sort();
     const cat = [...terminalsOf({ type })].sort();
     if (geo.join() !== cat.join()) out.push(`${type}: geometri [${geo.join()}] ≠ katalog [${cat.join()}]`);
   }
   for (const type of Object.keys(CATALOG) as ComponentType[]) {
-    if (type !== 'custom' && !(type in GEOMETRY)) out.push(`${type}: geometri yok`);
+    if (type !== 'custom' && !(type in GEOMETRY) && !viewOf(type)) out.push(`${type}: geometri yok`);
   }
   return out;
 }

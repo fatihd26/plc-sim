@@ -1,13 +1,14 @@
 // IEC 60617 esinli sembol çizimleri (yerel koordinat). Durum verilirse canlı gösterilir.
 
 import type { ReactNode } from 'react';
-import { ESP32_PINS, PLC_DI, PLC_DQ, strParam, type CustomDef } from '../../sim/catalog';
-import type { ComponentInstance } from '../../sim/schematic';
+import { ANALOG_FULL } from '../../sim/address';
+import { ESP32_PINS, PLC_AI, PLC_AQ, PLC_DI, PLC_DQ, strParam, type CustomDef } from '../../sim/catalog';
 import type { ComponentState } from '../../sim/simulation';
+import { viewOf } from '../devices';
+import type { SymbolInstance } from '../devices/types';
 import { geometryOf } from './geometry';
-import { ConveyorBody, CylinderBody, FanBody, PumpBody } from './mechanics';
 
-export type SymbolInstance = Pick<ComponentInstance, 'type' | 'custom' | 'params'>;
+export type { SymbolInstance };
 
 interface PoleProps {
   x: number;
@@ -301,6 +302,18 @@ export function SymbolBody({ inst, state, xrefText }: BodyProps): ReactNode {
           <text x={208} y={50} className="sym-text tiny">
             485
           </text>
+          {[...PLC_AI, ...PLC_AQ].map((name, i) => {
+            const raw = i < PLC_AI.length ? s?.ai[i]?.raw : s?.aq[i - PLC_AI.length];
+            const y = 20 + i * 20;
+            return (
+              <g key={name}>
+                <line x1={0} y1={y} x2={4} y2={y} />
+                <text x={8} y={y + 3} className="sym-text tiny" textAnchor="start">
+                  {s && raw !== undefined ? analogText(raw) : i < PLC_AI.length ? 'AI' : 'AQ'}
+                </text>
+              </g>
+            );
+          })}
         </g>
       );
     }
@@ -336,16 +349,13 @@ export function SymbolBody({ inst, state, xrefText }: BodyProps): ReactNode {
         </g>
       );
     }
-    case 'cylinder':
-      return <CylinderBody inst={inst} s={st(state, 'cylinder')} />;
-    case 'conveyor':
-      return <ConveyorBody s={st(state, 'conveyor')} />;
-    case 'fan':
-      return <FanBody inst={inst} s={st(state, 'fan')} />;
-    case 'pump':
-      return <PumpBody inst={inst} s={st(state, 'pump')} />;
     case 'custom':
       return <CustomBody def={inst.custom} state={st(state, 'custom')} w={g.w} />;
+    default: {
+      const view = viewOf(inst.type);
+      if (!view) return <rect x={0} y={0} width={g.w} height={g.h} className="box" />;
+      return <view.Body inst={inst} s={state?.type === inst.type ? state : undefined} />;
+    }
   }
 }
 
@@ -419,4 +429,10 @@ export function SymbolPreview({ inst, width = 64, height = 48 }: { inst: SymbolI
       ))}
     </svg>
   );
+}
+
+/** Analog ham değerin kısa gösterimi (0..27648 → 0..10 V; 32767 = taşma/kablo kopuk). */
+function analogText(raw: number): string {
+  if (raw >= 32767) return '!!';
+  return `${((raw * 10) / ANALOG_FULL).toFixed(1)}`;
 }

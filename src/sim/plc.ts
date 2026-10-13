@@ -2,7 +2,7 @@
 // Program yalnızca process image üzerinde çalışır; terminaller scan başında
 // okunur ve scan sonunda yazılır.
 
-import { AREA_BYTES, bitIndex, type Area, type BitAddress } from './address';
+import { AI_COUNT, AQ_COUNT, AREA_BYTES, bitIndex, type Area, type BitAddress } from './address';
 import {
   compileProgram,
   createRuntime,
@@ -19,6 +19,10 @@ export class Plc {
   readonly diTerminals: boolean[] = new Array<boolean>(AREA_BYTES.I * 8).fill(false);
   /** DQ modülünün fiziksel çıkış terminalleri (yalnız scan sonunda güncellenir). */
   readonly dqTerminals: boolean[] = new Array<boolean>(AREA_BYTES.Q * 8).fill(false);
+  /** Analog giriş modülünün ham değerleri (her tick güncellenir; scan başında %IW'ye kopyalanır). */
+  readonly aiTerminals: number[] = new Array<number>(AI_COUNT).fill(0);
+  /** Analog çıkış modülünün ham değerleri (scan sonunda %QW'den kopyalanır). */
+  readonly aqTerminals: number[] = new Array<number>(AQ_COUNT).fill(0);
 
   /** Process image: PII (%I), PIQ (%Q) ve bayrak belleği (%M). */
   private readonly image: Record<Area, boolean[]> = {
@@ -44,6 +48,7 @@ export class Plc {
   scan(dtMs = 0): void {
     // 1. Giriş terminalleri → PII (scan boyunca sabit kalır)
     for (let i = 0; i < this.diTerminals.length; i++) this.image.I[i] = this.diTerminals[i]!;
+    for (let i = 0; i < this.aiTerminals.length; i++) this.runtime.iw[i] = this.aiTerminals[i]!;
 
     // 2. Program yürütme
     this.trace = executeProgram(
@@ -56,6 +61,7 @@ export class Plc {
 
     // 3. PIQ → çıkış terminalleri
     for (let i = 0; i < this.dqTerminals.length; i++) this.dqTerminals[i] = this.image.Q[i]!;
+    for (let i = 0; i < this.aqTerminals.length; i++) this.aqTerminals[i] = this.runtime.qw[i]!;
 
     this.scanCount++;
   }
@@ -65,6 +71,8 @@ export class Plc {
     for (const area of ['I', 'Q', 'M'] as const) this.image[area].fill(false);
     this.diTerminals.fill(false);
     this.dqTerminals.fill(false);
+    this.aiTerminals.fill(0);
+    this.aqTerminals.fill(0);
     this.trace = {};
     this.runtime = createRuntime();
   }
@@ -81,6 +89,21 @@ export class Plc {
   /** Alan içi düz indeksle bit yazar (Modbus master için). */
   writeBitAt(area: Area, index: number, value: boolean): void {
     if (index >= 0 && index < this.image[area].length) this.image[area][index] = value;
+  }
+
+  /** Hızlı sayıcı donanımı: darbe sayısını ekler (scan'den bağımsız, her tick). */
+  countPulses(index: number, delta: number): void {
+    if (index >= 0 && index < this.runtime.hc.length) this.runtime.hc[index] = this.runtime.hc[index]! + delta;
+  }
+
+  /** Hızlı sayıcı değerleri. */
+  hscValues(): number[] {
+    return [...this.runtime.hc];
+  }
+
+  /** %IW ve %QW kelimelerinin kopyası. */
+  analogWords(): { iw: number[]; qw: number[] } {
+    return { iw: [...this.runtime.iw], qw: [...this.runtime.qw] };
   }
 
   getWord(index: number): number {

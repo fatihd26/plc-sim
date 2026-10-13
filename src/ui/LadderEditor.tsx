@@ -5,9 +5,11 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { formatOperand, formatValue, parseOperand, parseValue } from '../sim/address';
 import { INSTR_MIME, INSTRUCTION_GROUPS, INSTRUCTIONS, type Instruction } from '../sim/instructions';
+import { BOX_SPECS } from '../sim/boxes';
 import {
   checkOutputAddress,
   COMPARE_OPS,
+  isBox,
   isCounter,
   isTimer,
   type Coil,
@@ -510,6 +512,7 @@ function OutputForm({
   const type = coil.type ?? 'coil';
   const box = isTimer(type) || isCounter(type);
   const bit = (t: string) => attempt(() => formatOperand(parseOperand(t)));
+  const value = (t: string) => attempt(() => formatValue(parseValue(t)));
   const typeSelect = (
     <label>
       Çıkış komutu
@@ -522,6 +525,36 @@ function OutputForm({
       </select>
     </label>
   );
+  if (isBox(type)) {
+    const spec = BOX_SPECS[type];
+    return (
+      <div className="element-form">
+        <h4>{spec.title}</h4>
+        {typeSelect}
+        {spec.args.map((a) => (
+          <CheckedInput
+            key={`${a.key}${coil.args?.[a.key] ?? ''}`}
+            label={a.label}
+            value={coil.args?.[a.key] ?? a.default}
+            check={value}
+            onCommit={(v) => onPatch({ args: { ...coil.args, [a.key]: v } })}
+          />
+        ))}
+        <CheckedInput
+          key={`out${coil.address}`}
+          label="OUT – sonuç adresi (%MW / %QW)"
+          value={coil.address}
+          check={(t) => attempt(() => checkOutputAddress(type, t))}
+          onCommit={(address) => onPatch({ address })}
+        />
+        <p className="muted small">
+          {spec.description} Rung enerjiliyken her scan'de hesaplanır. Analog: %IW0..1 girişler, %QW0..1 çıkışlar
+          (0..27648 = 0..10 V / 4..20 mA).
+        </p>
+        <LabelInput label={coil.label ?? ''} onLabel={(label) => onPatch({ label })} />
+      </div>
+    );
+  }
   if (!box) {
     return (
       <AddressForm

@@ -7,12 +7,16 @@ import { controllerIo } from './ioConfig';
 import {
   CATALOG,
   COMPONENT_TYPES,
+  CORE_FAULTS,
+  terminalDomain,
   terminalsOf,
   validateCustomDef,
   type ComponentType,
+  type CoreType,
   type CustomDef,
   type ParamValue,
 } from './catalog';
+import { moduleOf } from './modules';
 import { compileProgram, type LadderProgram } from './ladder';
 
 export type Rotation = 0 | 90 | 180 | 270;
@@ -39,6 +43,8 @@ export interface ComponentInstance {
   modbusPolls?: ModbusPoll[];
   /** Yalnız `custom`: bileşenin tanımı (kütüphanedeki tanımın kopyası). */
   custom?: CustomDef;
+  /** Simülasyon başında etkin arızalar (arıza bulma alıştırmaları için). */
+  faults?: string[];
 }
 
 export interface TerminalRef {
@@ -52,11 +58,20 @@ export interface Wire {
   b: TerminalRef;
   /** Elle şekillendirilmiş güzergâhın ara noktaları; yoksa otomatik yönlendirilir. */
   points?: Point[];
+  /** Kablo kopuk (arıza bulma alıştırması): simülasyonda iletmez. */
+  broken?: boolean;
 }
 
 export interface Page {
   id: string;
   title: string;
+}
+
+/** Görev: açıklama ve otomatik denetim senaryosu (scenario.ts). */
+export interface Task {
+  title: string;
+  text: string;
+  scenario: string;
 }
 
 export interface Schematic {
@@ -67,6 +82,10 @@ export interface Schematic {
   pages?: Page[];
   /** Kullanıcı tanımlı bileşen tipleri. */
   library?: CustomDef[];
+  /** Başlangıç arızalarını ve kopuk kabloları öğrenciden gizle (arıza bulma alıştırması). */
+  hideFaults?: boolean;
+  /** Görev (öğretmenin yazdığı açıklama ve denetim senaryosu). */
+  task?: Task;
   components: ComponentInstance[];
   wires: Wire[];
 }
@@ -129,6 +148,10 @@ export function validateSchematic(s: Schematic): string[] {
     for (const key of Object.keys(c.params ?? {})) {
       if (!CATALOG[c.type].params.some((p) => p.key === key)) errors.push(`${c.name}: bilinmeyen parametre "${key}"`);
     }
+    if (c.faults) {
+      const known = faultsOf(c.type).map((f) => f.key);
+      for (const f of c.faults) if (!known.includes(f)) errors.push(`${c.name}: bilinmeyen arıza "${f}"`);
+    }
     for (const e of controllerIo(c).errors) errors.push(`${c.name} G/Ç: ${e}`);
     if (c.modbusPolls) {
       if (c.type !== 'plc') errors.push(`${c.name}: Modbus tablosu yalnız PLC'de olabilir`);
@@ -160,9 +183,23 @@ export function validateSchematic(s: Schematic): string[] {
       }
     }
     if (sameTerminal(w.a, w.b)) errors.push(`Kablo ${w.id}: iki ucu aynı terminalde`);
+    const ca = byId.get(w.a.component);
+    const cb = byId.get(w.b.component);
+    if (ca && cb && ca.type !== 'junction' && cb.type !== 'junction' && COMPONENT_TYPES.includes(ca.type) && COMPONENT_TYPES.includes(cb.type)) {
+      const da = terminalDomain(ca, w.a.terminal);
+      const db = terminalDomain(cb, w.b.terminal);
+      if (da !== db) errors.push(`Kablo ${w.id}: ${DOMAIN_NAMES[da]} ucu ${DOMAIN_NAMES[db]} ucuna bağlanamaz`);
+    }
     if (w.points && !w.points.every((p) => Number.isFinite(p?.x) && Number.isFinite(p?.y))) {
       errors.push(`Kablo ${w.id}: geçersiz büküm noktası`);
     }
   }
   return errors;
+}
+
+const DOMAIN_NAMES = { electric: 'elektrik', pneumatic: 'pnömatik', hydraulic: 'hidrolik' } as const;
+
+/** Tipin enjekte edilebilen arızaları. */
+export function faultsOf(type: ComponentType): readonly { key: string; label: string }[] {
+  return moduleOf(type)?.faults ?? CORE_FAULTS[type as CoreType] ?? [];
 }

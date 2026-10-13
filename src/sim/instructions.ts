@@ -1,14 +1,30 @@
 // Ladder komut kütüphanesi: editör paletinde ve sol kütüphanede gösterilen komutlar.
 
+import { BOX_SPECS, type BoxType } from './boxes';
 import type { CoilType } from './ladder';
 import type { InstructionAction } from './ladderEdit';
 
 /** Sürükle-bırakta komut anahtarını taşıyan veri türü. */
 export const INSTR_MIME = 'application/x-plcsim-instruction';
 
-export type InstructionGroup = 'Bit mantığı' | 'Karşılaştırma' | 'Çıkışlar' | 'Zamanlayıcılar' | 'Sayıcılar';
+export type InstructionGroup =
+  | 'Bit mantığı'
+  | 'Karşılaştırma'
+  | 'Çıkışlar'
+  | 'Zamanlayıcılar'
+  | 'Sayıcılar'
+  | 'Matematik'
+  | 'Analog ve PID';
 
-export const INSTRUCTION_GROUPS: InstructionGroup[] = ['Bit mantığı', 'Karşılaştırma', 'Çıkışlar', 'Zamanlayıcılar', 'Sayıcılar'];
+export const INSTRUCTION_GROUPS: InstructionGroup[] = [
+  'Bit mantığı',
+  'Karşılaştırma',
+  'Çıkışlar',
+  'Zamanlayıcılar',
+  'Sayıcılar',
+  'Matematik',
+  'Analog ve PID',
+];
 
 export interface Instruction {
   key: string;
@@ -68,4 +84,11 @@ export const INSTRUCTIONS: Instruction[] = [
   output('CTU', 'Sayıcılar', 'CTU', 'Yukarı sayıcı', 'Her yükselen kenarda CV + 1; CV ≥ PV iken Q = 1. R sıfırlar.'),
   output('CTD', 'Sayıcılar', 'CTD', 'Aşağı sayıcı', 'Her yükselen kenarda CV − 1; CV ≤ 0 iken Q = 1. LD, CV = PV yükler.'),
   output('CTUD', 'Sayıcılar', 'CTUD', 'Yukarı/aşağı sayıcı', 'Rung yukarı (CU), CD girişi aşağı sayar; CV ≥ PV iken Q = 1. R sıfırlar.'),
+  ...(['MOVE', 'ADD', 'SUB', 'MUL', 'DIV'] as BoxType[]).map((t) => box(t, 'Matematik')),
+  ...(['SCALE', 'PID'] as BoxType[]).map((t) => box(t, 'Analog ve PID')),
 ];
+
+function box(type: BoxType, group: InstructionGroup): Instruction {
+  const s = BOX_SPECS[type];
+  return output(type, group, type, s.title, `${s.description} Çıkış (OUT): %MW veya %QW.`);
+}

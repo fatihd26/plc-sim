@@ -111,7 +111,17 @@ export interface MotorParams {
  * Hız birinci dereceden yaklaşır; akım kaymaya göre kalkış akımından nominale iner.
  * Faz sırası dönüş yönünü belirler (direction = +1 / −1).
  */
+export interface MotorDriveOptions {
+  ratio?: number;
+  locked?: boolean;
+  currentLimit?: number;
+  currentScale?: number;
+  tauScale?: number;
+}
+
 export class Motor {
+  /** Toplam mil devri (işaretli; enkoder için). */
+  revs = 0;
   /** Nominal hıza oranla işaretli hız, −1..1. */
   speed = 0;
   currentA = 0;
@@ -131,20 +141,35 @@ export class Motor {
     },
   ) {}
 
-  update(powered: boolean, dtMs: number, direction: 1 | -1 = 1): void {
+  /**
+   * `opts.ratio`: besleme frekansının nominale oranı (VFD; şebekede 1). `opts.locked`: mil
+   * sıkışmış (arıza veya fren kapalı). `opts.currentLimit`: akım sınırı, In katı (VFD).
+   * `opts.currentScale`: akım çarpanı (ör. yıldız bağlantıda 1/3). `opts.tauScale`: kalkış
+   * zaman sabiti çarpanı (yıldızda düşük moment → yavaş kalkış).
+   */
+  update(powered: boolean, dtMs: number, direction: 1 | -1 = 1, opts: MotorDriveOptions = {}): void {
     const p = this.params;
+    const ratio = opts.ratio ?? 1;
     this.powered = powered;
     if (powered) this.direction = direction;
-    const target = powered ? direction : 0;
-    const tau = powered ? p.startTauMs : p.coastTauMs;
-    this.speed += ((target - this.speed) * dtMs) / tau;
-    if (!powered && Math.abs(this.speed) < 1e-4) this.speed = 0;
+    if (opts.locked) {
+      this.speed = 0;
+    } else {
+      const target = powered ? direction * ratio : 0;
+      const tau = powered ? p.startTauMs * (opts.tauScale ?? 1) : p.coastTauMs;
+      this.speed += ((target - this.speed) * dtMs) / tau;
+      if (!powered && Math.abs(this.speed) < 1e-4) this.speed = 0;
+    }
 
     // Kayma: 0 (senkron) .. 1 (duruş) .. 2 (ters yönde dönerken frenleme); akım 1'de doyar.
     // Kalıcı akım yükle orantılı (basitleştirme), duruşta kilitli rotor akımı.
-    const slip = Math.min(1, Math.max(0, 1 - this.speed * direction));
+    const slip = ratio > 0 ? Math.min(1, Math.max(0, 1 - (this.speed * direction) / ratio)) : 1;
     const load = p.loadPct / 100;
-    this.currentA = powered ? p.ratedCurrentA * (load + (p.lockedRotorRatio - load) * slip) : 0;
+    let current = powered ? p.ratedCurrentA * (load + (p.lockedRotorRatio - load) * slip) : 0;
+    current *= opts.currentScale ?? 1;
+    if (opts.currentLimit !== undefined) current = Math.min(current, p.ratedCurrentA * opts.currentLimit);
+    this.currentA = current;
+    this.revs += (this.speed * p.ratedRpm * dtMs) / 60_000;
 
     const degPerMs = (this.speed * p.ratedRpm * 360) / 60_000;
     this.angleDeg = (((this.angleDeg + degPerMs * dtMs) % 360) + 360) % 360;
@@ -202,6 +227,8 @@ export interface ConveyorParams {
   transitMs: number;
   /** Otomatik kutu besleme aralığı [ms]; 0 = kapalı. */
   feedMs: number;
+  /** Kutu malzemesi: karton, metal veya sırayla karışık. */
+  material?: 'cardboard' | 'metal' | 'mixed';
 }
 
 /**
@@ -218,6 +245,9 @@ export class Conveyor {
 
   /** Kutuların sol kenar konumları. */
   boxes: number[] = [];
+  /** Kutu başına: metal mi (endüktif sensör yalnız metali algılar). */
+  metal: boolean[] = [];
+  private fed = 0;
   /** Bant yüzeyinin toplam yer değiştirmesi (animasyon için), 0..1. */
   beltPos = 0;
   /** Bandın sonundan düşen kutu sayısı. */
@@ -232,13 +262,18 @@ export class Conveyor {
     this.beltPos = (((this.beltPos + dx) % 1) + 1) % 1;
     if (dx !== 0) {
       const kept: number[] = [];
-      for (const p of this.boxes) {
+      const metal: boolean[] = [];
+      this.boxes.forEach((p, i) => {
         const q = p + dx;
         const center = q + Conveyor.BOX / 2;
         if (center > 1) this.delivered++;
-        else if (center >= 0) kept.push(q);
-      }
+        else if (center >= 0) {
+          kept.push(q);
+          metal.push(this.metal[i] ?? false);
+        }
+      });
       this.boxes = kept;
+      this.metal = metal;
     }
     if (this.params.feedMs > 0) {
       this.feedTimerMs += dtMs;
@@ -249,13 +284,21 @@ export class Conveyor {
   /** Bandın başına kutu koyar; başta yer yoksa reddedilir. */
   addBox(): boolean {
     if (this.boxes.some((p) => p < Conveyor.BOX + Conveyor.GAP)) return false;
+    const m = this.params.material ?? 'cardboard';
     this.boxes.push(0);
+    this.metal.push(m === 'metal' || (m === 'mixed' && this.fed % 2 === 1));
+    this.fed++;
     return true;
+  }
+
+  /** `at` (0..1) noktasında kutu var mı; `metalOnly`: yalnız metal kutular. */
+  boxAt(at: number, metalOnly = false): boolean {
+    return this.boxes.some((p, i) => p <= at && p + Conveyor.BOX >= at && (!metalOnly || this.metal[i]));
   }
 
   /** Fotosel: ışın bir kutu tarafından kesiliyor mu. */
   get sensorBlocked(): boolean {
-    return this.boxes.some((p) => p <= Conveyor.SENSOR && p + Conveyor.BOX >= Conveyor.SENSOR);
+    return this.boxAt(Conveyor.SENSOR);
   }
 }
 
