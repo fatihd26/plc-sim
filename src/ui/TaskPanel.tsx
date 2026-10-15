@@ -34,9 +34,11 @@ interface Props {
   schematic: Schematic;
   edit: boolean;
   dispatch(action: EditorAction): void;
+  /** Kontrol sonucu (eğitim yolu görevi tamamlamak için). */
+  onResult?(ok: boolean): void;
 }
 
-export function TaskPanel({ schematic, edit, dispatch }: Props) {
+export function TaskPanel({ schematic, edit, dispatch, onResult }: Props) {
   const task = schematic.task;
   const [result, setResult] = useState<ScenarioResult | null>(null);
   const [busy, setBusy] = useState(false);
@@ -52,8 +54,10 @@ export function TaskPanel({ schematic, edit, dispatch }: Props) {
     setResult(null);
     // Arayüz "denetleniyor" durumunu çizebilsin diye bir sonraki karede çalıştır.
     setTimeout(() => {
-      setResult(runScenario(schematic, task.scenario));
+      const r = runScenario(schematic, task.scenario);
+      setResult(r);
       setBusy(false);
+      onResult?.(r.ok);
     }, 30);
   };
 

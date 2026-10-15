@@ -2,6 +2,7 @@
 // denetim senaryosu. Öğrenci ladder programını yazar, "Kontrol et" ile senaryoyu koşturur.
 // Her görevin çözümü ilgili örnek projedir (tasks.test.ts çözümün senaryoyu geçtiğini denetler).
 
+import { lampRelaySolution, reversingSolution, reversingStarter, sealRelaySolution, withoutWires } from './basics';
 import { conveyorSchematic, fanSchematic, type Example } from './examples';
 import {
   elevatorSchematic,
@@ -20,11 +21,13 @@ export interface TaskDef {
   task: Task;
   /** Çözümü içeren şema (programlı). */
   solution(): Schematic;
+  /** Öğrencinin başladığı şema; yoksa çözümün programı boşaltılmış hâli (PLC'siz görevlerde kablosuz). */
+  starter?(): Schematic;
 }
 
 /** Çözüm şemasından görev şeması: PLC programları boşaltılır, görev eklenir. */
 export function taskSchematic(def: TaskDef): Schematic {
-  const s = def.solution();
+  const s = def.starter ? def.starter() : def.solution();
   s.title = `Görev: ${def.title}`;
   s.task = structuredClone(def.task);
   for (const c of s.components) if (c.type === 'plc' || c.type === 'esp32') c.program = { networks: [] };
@@ -34,6 +37,83 @@ export function taskSchematic(def: TaskDef): Schematic {
 const lines = (...l: string[]) => l.join('\n');
 
 export const TASKS: TaskDef[] = [
+  {
+    id: 'task-lamp-relay',
+    title: 'Lamba yakma (röle ile)',
+    summary: 'PLC yok: S1 basılıyken K1 rölesi çeksin, rölenin kontağı P1 lambasını yaksın.',
+    solution: lampRelaySolution,
+    starter: () => withoutWires(lampRelaySolution()),
+    task: {
+      title: 'Lamba yakma (röle ile)',
+      text: lines(
+        'Elemanlar yerleştirildi, kabloları sen bağlayacaksın.',
+        'S1 basılıyken K1 rölesinin bobini (A1-A2) G1 24 V ile beslensin.',
+        "K1'in 13-14 kontağı P1 lambasını yaksın. S1 bırakılınca lamba sönmeli.",
+      ),
+      scenario: lines(
+        'kontrol değil P1.yanik',
+        'bas S1',
+        'bekle K1.kontak en fazla 1 s',
+        'kontrol P1.yanik boyunca 500 ms',
+        'bırak S1',
+        'bekle değil P1.yanik en fazla 1 s',
+      ),
+    },
+  },
+  {
+    id: 'task-seal-relay',
+    title: 'Röle ile start-stop',
+    summary: 'PLC yok: S1 start, S2 stop; K1 rölesi kendi kontağıyla mühürlensin.',
+    solution: sealRelaySolution,
+    starter: () => withoutWires(sealRelaySolution()),
+    task: {
+      title: 'Röle ile start-stop (mühürleme)',
+      text: lines(
+        'S1 (NO) start, S2 (NC) stop. S1 bırakılınca K1 çekili kalmalı (mühürleme), S2 basılınca bırakmalı.',
+        "Mühür için K1'in bir NO kontağını S1'e paralel bağla; lambayı diğer NO kontağıyla yak.",
+      ),
+      scenario: lines(
+        'tıkla S1',
+        'bekle K1.kontak en fazla 1 s',
+        'kontrol P1.yanik boyunca 1 s',
+        'tıkla S2',
+        'bekle değil P1.yanik en fazla 1 s',
+        'kontrol değil K1.kontak boyunca 500 ms',
+      ),
+    },
+  },
+  {
+    id: 'task-reversing',
+    title: 'Kilitlemeli ileri-geri motor',
+    summary: 'PLC yok: S1 ileri, S2 geri, S0 stop; K1 ve K2 asla birlikte çekmesin.',
+    solution: reversingSolution,
+    starter: reversingStarter,
+    task: {
+      title: 'Kilitlemeli ileri-geri motor',
+      text: lines(
+        'Güç devresi hazır: K1 ileri, K2 geri (iki faz yer değiştirir). Kumanda devresini sen kur.',
+        'S1 (NO) ileri, S2 (NO) geri, S0 (NC) stop. Her kontaktör kendi 13-14 kontağıyla mühürlensin.',
+        "Biri çekiliyken diğeri çekmemeli: karşı kontaktörün 21-22 NC kontağını bobinin önüne koy. Termik (95-96) hepsini kessin.",
+      ),
+      scenario: lines(
+        'tıkla S1',
+        'bekle K1.kontak en fazla 1 s',
+        'kontrol M1.calisiyor ve değil K2.kontak',
+        '# İleri dönerken geriye basmak işe yaramamalı',
+        'bas S2',
+        'kontrol değil K2.kontak boyunca 500 ms',
+        'bırak S2',
+        'kontrol K1.kontak',
+        'tıkla S0',
+        'bekle değil K1.kontak en fazla 1 s',
+        'tıkla S2',
+        'bekle K2.kontak en fazla 1 s',
+        'kontrol M1.calisiyor ve değil K1.kontak boyunca 500 ms',
+        'tıkla S0',
+        'bekle değil K2.kontak en fazla 1 s',
+      ),
+    },
+  },
   {
     id: 'task-fan',
     title: 'Fan start-stop',

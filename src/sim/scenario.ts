@@ -168,6 +168,19 @@ function evaluator(schematic: Schematic) {
   };
 }
 
+/**
+ * Senaryo dilindeki bir koşulu canlı snapshot üzerinde değerlendirir (eğitim adımları).
+ * Koşul anlaşılamaz veya sinyal yoksa false döner.
+ */
+export function evalCondition(schematic: Schematic, snapshot: SimSnapshot, text: string): boolean {
+  try {
+    const r = evaluator(schematic)(snapshot, parseCond(text));
+    return r.ok && !r.error;
+  } catch {
+    return false;
+  }
+}
+
 export function runScenario(schematic: Schematic, text: string): ScenarioResult {
   const ids = new Map(schematic.components.map((c) => [c.name, c.id]));
   const lines = text.split(/\r?\n/).map((t, i) => ({ line: i + 1, text: t.trim() })).filter((l) => l.text && !l.text.startsWith('#'));

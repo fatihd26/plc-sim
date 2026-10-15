@@ -4,7 +4,18 @@
 
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { EXAMPLES as BASE_EXAMPLES, type Example } from '../sim/examples';
-import { TASK_EXAMPLES } from '../sim/tasks';
+import { TASK_EXAMPLES, TASKS, taskSchematic } from '../sim/tasks';
+import { locate, type Item, type StepContext } from '../learn/curriculum';
+import {
+  isDone,
+  loadProgress,
+  nextItem,
+  parseProgress,
+  PROGRESS_EXTENSION,
+  saveProgress,
+  serializeProgress,
+  type Progress,
+} from '../learn/progress';
 import type { LadderProgram } from '../sim/ladder';
 import { startStopProgram } from '../sim/programs';
 import { emptySchematic, pagesOf, pageOf, type Schematic } from '../sim/schematic';
@@ -31,7 +42,9 @@ import { IoTable } from './IoTable';
 import { LadderEditor } from './LadderEditor';
 import { LadderView } from './LadderView';
 import { ModbusStatusTable } from './ModbusPanel';
-import { downloadSchematic, FILE_EXTENSION, loadAutosave, parseSchematic, saveAutosave } from './project';
+import { downloadJson, downloadSchematic, FILE_EXTENSION, loadAutosave, parseSchematic, saveAutosave } from './project';
+import { LearnCoach } from './LearnCoach';
+import { LearnHome } from './LearnHome';
 import { useSimulation } from './useSimulation';
 import { TaskPanel } from './TaskPanel';
 import { TrendPanel } from './TrendPanel';
@@ -124,6 +137,46 @@ export function App() {
   );
 
   const toggleMode = useCallback(() => setMode((m) => (m === 'edit' ? 'sim' : 'edit')), []);
+
+  // --- Eğitim -------------------------------------------------------------------------------
+  const [progress, setProgress] = useState<Progress>(loadProgress);
+  const [learnHome, setLearnHome] = useState(false);
+  useEffect(() => saveProgress(progress), [progress]);
+  const learnAt = progress.current ? locate(progress.current.item) : null;
+  const learnItem = learnAt && learnAt.item.kind !== 'soon' ? learnAt.item : null;
+  const setCurrent = (current: Progress['current']) => setProgress((p) => ({ ...p, current }));
+
+  /** Ders veya görevi açar: şemasını yükler, eğitim kartını gösterir. */
+  const openItem = (item: Item) => {
+    if (item.kind === 'soon') return;
+    const fresh = item.kind === 'task' ? taskSchematic(TASKS.find((t) => t.id === item.taskId)!) : item.build?.();
+    if (fresh) {
+      const ownWork = !progress.current && schematic.components.length > 0;
+      if (ownWork && !window.confirm('Eğitim için yeni bir şema açılacak ve açık proje kapanacak. Saklamak istiyorsan önce Vazgeç deyip Kaydet ile indir. Devam edilsin mi?')) return;
+      loadNew(fresh, `Eğitim: ${item.title}`);
+    }
+    setCurrent({ item: item.id, step: 0 });
+    setLearnHome(false);
+  };
+  const completeItem = (id: string) =>
+    setProgress((p) => (isDone(p, id) ? p : { ...p, done: { ...p.done, [id]: new Date().toISOString() } }));
+  const saveLearn = () =>
+    downloadJson(serializeProgress(progress, schematic), `ilerleme-${new Date().toISOString().slice(0, 10)}${PROGRESS_EXTENSION}`);
+  const loadLearn = async (file: File) => {
+    try {
+      const r = parseProgress(await file.text());
+      if (r.schematic) loadNew(parseSchematic(JSON.stringify(r.schematic)), `${file.name} yüklendi`);
+      else setMessage(`${file.name} yüklendi`);
+      setProgress(r.progress);
+    } catch (e) {
+      setMessage(`İlerleme yüklenemedi: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  };
+  /** Eğitim dışı bir proje açılınca eğitim kartı kapanır (ilerleme saklanır). */
+  const loadProject = (next: Schematic, note: string) => {
+    setCurrent(undefined);
+    loadNew(next, note);
+  };
 
   // --- PLC seçimi: seçili PLC, yoksa son seçilen, yoksa ilk PLC ---------------------------
   const plcs = schematic.components.filter((c) => isController(c.type));
@@ -225,7 +278,7 @@ export function App() {
   // --- Klavye kısayolları ---------------------------------------------------------------
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (isTyping(e.target)) return;
+      if (isTyping(e.target) || learnHome) return;
       const key = e.key.toLowerCase();
       const ctrl = e.ctrlKey || e.metaKey;
       if (e.key === 'F5') {
@@ -278,12 +331,12 @@ export function App() {
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mode, running, selection, schematic, page, fit, toggleMode, gotoPage, copy, paste, sim.pause, sim.start]);
+  }, [mode, running, selection, schematic, page, fit, toggleMode, gotoPage, copy, paste, sim.pause, sim.start, learnHome]);
 
   // --- Dosya ------------------------------------------------------------------------------
   const onOpenFile = async (file: File) => {
     try {
-      loadNew(parseSchematic(await file.text()), `${file.name} açıldı`);
+      loadProject(parseSchematic(await file.text()), `${file.name} açıldı`);
     } catch (e) {
       setMessage(`Açılamadı: ${e instanceof Error ? e.message : String(e)}`);
     }
@@ -307,6 +360,9 @@ export function App() {
           </span>
           PLC-SIM <span className="version">v0.4</span>
         </div>
+        <button type="button" className={`learn-btn${learnItem || learnHome ? ' active' : ''}`} onClick={() => setLearnHome(true)}>
+          🎓 Öğren
+        </button>
         <nav className="mode-tabs" role="tablist" aria-label="Çalışma modu">
           <button type="button" role="tab" aria-selected={edit} className={edit ? 'active' : ''} onClick={() => setMode('edit')}>
             ✎ Düzenle
@@ -334,8 +390,8 @@ export function App() {
 
       <div className="ribbon" role="toolbar" aria-label="Komutlar">
         <Group label="Dosya">
-          <Tool icon="🗋" label="Yeni" disabled={!edit} onClick={() => loadNew(emptySchematic(), 'Yeni proje')} />
-          <ExamplesMenu disabled={!edit} onPick={(e) => loadNew(e.build(), `Örnek yüklendi: ${e.title}`)} />
+          <Tool icon="🗋" label="Yeni" disabled={!edit} onClick={() => loadProject(emptySchematic(), 'Yeni proje')} />
+          <ExamplesMenu disabled={!edit} onPick={(e) => loadProject(e.build(), `Örnek yüklendi: ${e.title}`)} />
           <Tool icon="📂" label="Aç" disabled={!edit} onClick={() => fileRef.current?.click()} />
           <Tool icon="💾" label="Kaydet" onClick={() => downloadSchematic(schematic)} />
           <input
@@ -427,6 +483,32 @@ export function App() {
             onRename={(id, title) => dispatch({ type: 'renamePage', id, title })}
             onDelete={deletePage}
           />
+          {learnItem && progress.current && (
+            <LearnCoach
+              key={learnItem.id}
+              item={learnItem}
+              step={progress.current.step}
+              ctx={{ schematic, snapshot, mode, running, plcOpen } satisfies StepContext}
+              done={isDone(progress, learnItem.id)}
+              attempts={progress.attempts[learnItem.id] ?? 0}
+              next={nextItem({ ...progress, done: { ...progress.done, [learnItem.id]: 'x' } }, learnItem.id)}
+              onStep={(step) => setCurrent({ item: learnItem.id, step })}
+              onComplete={() => completeItem(learnItem.id)}
+              onAttempt={() =>
+                setProgress((p) => ({ ...p, attempts: { ...p.attempts, [learnItem.id]: (p.attempts[learnItem.id] ?? 0) + 1 } }))
+              }
+              onNext={() => {
+                const n = nextItem({ ...progress, done: { ...progress.done, [learnItem.id]: 'x' } }, learnItem.id);
+                if (n) openItem(n);
+              }}
+              onHome={() => setLearnHome(true)}
+              onClose={() => setCurrent(undefined)}
+              onShowPanel={(tab) => {
+                setPlcOpen(true);
+                setBottomTab(tab);
+              }}
+            />
+          )}
           {sim.error && (
             <div className="banner error">
               <strong>Simülasyon kurulamadı:</strong> {sim.error}
@@ -467,7 +549,12 @@ export function App() {
               {bottomTab === 'trend' ? (
                 <TrendPanel schematic={schematic} snapshot={snapshot} selected={trendKeys} onSelected={setTrendKeys} />
               ) : bottomTab === 'task' ? (
-                <TaskPanel schematic={schematic} edit={edit} dispatch={dispatch} />
+                <TaskPanel
+                  schematic={schematic}
+                  edit={edit}
+                  dispatch={dispatch}
+                  onResult={(ok) => learnItem?.kind === 'task' && ok && completeItem(learnItem.id)}
+                />
               ) : !plc ? (
                 <p className="dock-note">Şemada PLC veya ESP32 yok. Kütüphaneden bir PLC ya da ESP32 I/O kartı ekleyin.</p>
               ) : edit ? (
@@ -559,6 +646,16 @@ export function App() {
           )
         )}
       </footer>
+
+      {learnHome && (
+        <LearnHome
+          progress={progress}
+          onOpen={openItem}
+          onClose={() => setLearnHome(false)}
+          onSave={saveLearn}
+          onLoad={(f) => void loadLearn(f)}
+        />
+      )}
 
       {narrow && (
         <nav className="sheet-tabs" aria-label="Paneller">

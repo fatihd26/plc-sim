@@ -49,11 +49,15 @@ const fileName = (title: string | undefined) =>
   (title ?? '').trim().replace(/[\\/:*?"<>|]+/g, '').replace(/\s+/g, '-') || 'proje';
 
 export function downloadSchematic(s: Schematic, name = fileName(s.title)): void {
-  const blob = new Blob([serializeSchematic(s)], { type: 'application/json' });
+  downloadJson(serializeSchematic(s), `${name}${FILE_EXTENSION}`);
+}
+
+export function downloadJson(text: string, file: string): void {
+  const blob = new Blob([text], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${name}${FILE_EXTENSION}`;
+  a.download = file;
   a.click();
   URL.revokeObjectURL(url);
 }
