@@ -5,6 +5,12 @@ sürüklenip bırakılır, terminaller kabloyla bağlanır; simülasyon modunda 
 (potansiyel renkleri, kontak durumları, motor, koruma açmaları, PLC online izleme). Her PLC'nin
 ladder programı alt panelden düzenlenir. Proje birden çok sayfadan oluşabilir.
 
+Hedef kitle, kendi başına pratik yapan MYO ve üniversite 1. sınıf öğrencisi. Üst çubuktaki
+**🎓 Öğren** düğmesi 5 seviyeli eğitim yolunu açar (Başlangıç → Saha Senaryoları): kısa dersler,
+canlı denetlenen adımlar ve otomatik kontrollü görevler. Temel ilke şu: öğrenci ladder'dan
+makineyi hayal etmek zorunda kalmamalı, programın sürdüğü mekanizma ekranda canlı çalışmalı.
+Eğitim kararları ve plan için bkz. [idea.md](idea.md).
+
 ```
 npm install
 npm run dev        # http://localhost:5173
@@ -62,6 +68,7 @@ npm run build      # tip kontrolü + üretim derlemesi
 | Pnömatik | Hava kaynağı (P), 5/2 yay dönüşlü, 5/2 çift bobinli, 5/3 orta kapalı, 3/2 selenoid valf (Y), tek yönlü akış kontrol valfi (V), çift / tek etkili silindir (Z) |
 | Hidrolik | Güç ünitesi – pompa, emniyet valfi, tank (P); 4/3 valf – kapalı / tandem / yüzer merkez (Y); hidrolik silindir (Z); ekskavatör kolu – bom, arm, kova (Z) |
 | Robotik | Lineer eksen – enkoder, REF, sınır sensörleri (M); elektro-pnömatik pick & place (U); el sıkışmalı robot hücresi (R); 3 katlı asansör (M); garaj kapısı (M) |
+| Sahneler | Trafik ışığı – tek yönlü yol, araçlar yeşilde geçer, kırmızıda durma çizgisinde bekler (H); kavşak – A ve B yolu, yaya geçidi, yaya ışığı ve yaya butonu (PB, PNP); çakışan yeşiller, kavşakta karşılaşan araçlar ve geçitteki yayaya gelen araç sahnede uyarı verir (H). Butonlu yaya geçidi – iki yönlü yol, iki kaldırım, araç ve yaya ışıkları, BEKLEYİN lambası (W) ve yaya butonu (PB) (H). Lamba uçları LED sürücü kartının sinyal girişleridir, PLC çıkışına doğrudan bağlanır |
 | Kullanıcı | Kutup türlerinden tanımlanan bileşenler (proje dosyasında saklanır) |
 
 **Sensör hedefi.** Sensör ve transmitterlerin "Algıladığı mekanizma / Ölçtüğü proses" parametresi

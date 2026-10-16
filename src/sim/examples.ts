@@ -13,6 +13,9 @@ import {
   positioningSchematic,
   robotCellSchematic,
   starDeltaSchematic,
+  pedCrossingSchematic,
+  trafficJunctionSchematic,
+  trafficLightSchematic,
   vfdModbusSchematic,
 } from './examplesLib';
 import type { ComponentInstance, Schematic, Wire } from './schematic';
@@ -533,7 +536,7 @@ export function troubleshootSchematic(): Schematic {
   return s;
 }
 
-export type ExampleGroup = 'Temel' | 'Mekanik' | 'Analog ve proses' | 'Sürücüler' | 'Akışkan gücü' | 'Robotik' | 'Arıza bulma' | 'Görevler';
+export type ExampleGroup = 'Temel' | 'Mekanik' | 'Analog ve proses' | 'Sürücüler' | 'Akışkan gücü' | 'Robotik' | 'Sahneler' | 'Arıza bulma' | 'Görevler';
 
 export interface Example {
   id: string;
@@ -704,6 +707,30 @@ export const EXAMPLES: Example[] = [
     description:
       'Kapanırken fotosel kesilirse kapı geri açılır. Kapının altına tıklayarak engel koyun. Alıştırma: tam açıkta 10 s bekleyip kendiliğinden kapanma ekleyin.',
     build: garageDoorSchematic,
+  },
+  {
+    id: 'traffic-light',
+    group: 'Sahneler',
+    title: 'Trafik ışığı: zamanlayıcı döngüsü',
+    description:
+      'Art arda bağlı üç TON kırmızı 5 s → yeşil 5 s → sarı 2 s döngüsünü kurar; araçlar yeşilde geçer, kırmızıda durma çizgisinde birikir. Yola tıklayarak araç ekleyin. Alıştırma: yeşile geçmeden önce 1 s kırmızı + sarı birlikte yansın.',
+    build: trafficLightSchematic,
+  },
+  {
+    id: 'ped-crossing',
+    group: 'Sahneler',
+    title: 'Butonlu yaya geçidi',
+    description:
+      'Araçlar normalde yeşilde. Yaya butona basınca talep hafızaya alınır ve BEKLEYİN yanar; araç yeşili en az 5 s sürdüyse sarı, tüm kırmızı, yaya yeşili ve temizleme süresi gelir. Geçide tıklayınca yaya gelir. Alıştırma: yaya yeşilinin son 2 saniyesinde yeşil yanıp sönsün (flaşör).',
+    build: pedCrossingSchematic,
+  },
+  {
+    id: 'traffic-junction',
+    group: 'Sahneler',
+    title: 'Kavşak: iki yol ve yaya butonu',
+    description:
+      'Altı TON\'luk zincir A ve B yollarına sırayla yol verir, aralarda 1 s tüm kırmızı bırakır. Yaya butonu talebi hafızaya alınır ve yaya B yeşiliyle birlikte geçer. Kavşağa tıklayınca yaya gelir. Alıştırma: B yolunda araç yoksa B fazını atlayın (yan yol sensörü yerine bekleyen araç sayısını düşünün).',
+    build: trafficJunctionSchematic,
   },
   {
     id: 'troubleshoot',

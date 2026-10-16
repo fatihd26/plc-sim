@@ -392,3 +392,91 @@ export function garageDoorSchematic(): Schematic {
   return b.build();
 }
 
+
+// --- Sahneler --------------------------------------------------------------------------------
+
+/** Trafik ışığı: kırmızı 5 s → yeşil 5 s → sarı 2 s, art arda bağlı üç TON ile döngü. */
+export function trafficLightSchematic(): Schematic {
+  const prog = program(
+    net('N1', 'Kırmızı süresi (T2 bitince döngü baştan başlar)', nc('T2'), coil('T0', 'TON', { preset: 5000 })),
+    net('N2', 'Yeşil süresi', no('T0'), coil('T1', 'TON', { preset: 5000 })),
+    net('N3', 'Sarı süresi', no('T1'), coil('T2', 'TON', { preset: 2000 })),
+    net('N4', 'Kırmızı', nc('T0'), coil('%Q0.0')),
+    net('N5', 'Sarı', series(no('T1'), nc('T2')), coil('%Q0.1')),
+    net('N6', 'Yeşil', series(no('T0'), nc('T1')), coil('%Q0.2')),
+  );
+  const b = builder('Trafik ışığı: zamanlayıcı döngüsü', [{ id: 'p1', title: 'Kavşak' }])
+    .add('G1', 'psu24', 40, 20)
+    .add('H1', 'trafficLight', 340, 40)
+    .add('A1', 'plc', 60, 240, { program: prog });
+  plcPower(b);
+  supply(b, 'H1', 'L+', 'M');
+  return b.wire('A1:Q0.0', 'H1:R').wire('A1:Q0.1', 'H1:Y').wire('A1:Q0.2', 'H1:G').build();
+}
+
+/**
+ * Kavşak: A yeşil 6 s → A sarı 2 s → tüm kırmızı 1 s → B yeşil 4 s → B sarı 2 s → tüm kırmızı 1 s.
+ * Yaya butonu talebi hafızaya alınır (%M0.0); talep varsa yaya, B yeşiliyle birlikte geçer.
+ */
+export function trafficJunctionSchematic(): Schematic {
+  const prog = program(
+    net('N1', 'A yeşil süresi (T5 bitince döngü baştan)', nc('T5'), coil('T0', 'TON', { preset: 6000 })),
+    net('N2', 'A sarı süresi', no('T0'), coil('T1', 'TON', { preset: 2000 })),
+    net('N3', 'Tüm kırmızı', no('T1'), coil('T2', 'TON', { preset: 1000 })),
+    net('N4', 'B yeşil süresi', no('T2'), coil('T3', 'TON', { preset: 4000 })),
+    net('N5', 'B sarı süresi', no('T3'), coil('T4', 'TON', { preset: 2000 })),
+    net('N6', 'Tüm kırmızı', no('T4'), coil('T5', 'TON', { preset: 1000 })),
+    net('N7', 'A kırmızı', no('T1'), coil('%Q0.0')),
+    net('N8', 'A sarı', series(no('T0'), nc('T1')), coil('%Q0.1')),
+    net('N9', 'A yeşil', nc('T0'), coil('%Q0.2')),
+    net('N10', 'B kırmızı', parallel(nc('T2'), no('T4')), coil('%Q0.3')),
+    net('N11', 'B sarı', series(no('T3'), nc('T4')), coil('%Q0.4')),
+    net('N12', 'B yeşil', series(no('T2'), nc('T3')), coil('%Q0.5')),
+    net('N13', 'Yaya talebi (buton)', no('%I0.0', 'PB'), coil('%M0.0', 'set')),
+    net('N14', 'Tüm kırmızıda talep yaya fazına döner', series(no('%M0.0'), no('T1'), nc('T2')), coil('%M0.1', 'set')),
+    net('N15', 'Talep karşılandı', no('%M0.1'), coil('%M0.0', 'reset')),
+    net('N16', 'B yeşili bitince yaya fazı biter', no('T3'), coil('%M0.1', 'reset')),
+    net('N17', 'Yaya yeşil', series(no('%M0.1'), no('T2'), nc('T3')), coil('%Q0.7')),
+    net('N18', 'Yaya kırmızı', nc('%Q0.7'), coil('%Q0.6')),
+  );
+  const b = builder('Kavşak: iki yol ve yaya butonu', [{ id: 'p1', title: 'Kavşak' }])
+    .add('G1', 'psu24', 40, 20)
+    .add('H1', 'trafficJunction', 360, 40)
+    .add('A1', 'plc', 60, 300, { program: prog });
+  plcPower(b);
+  supply(b, 'H1', 'L+', 'M');
+  ['AR', 'AY', 'AG', 'BR', 'BY', 'BG', 'PR', 'PG'].forEach((t, i) => b.wire(`A1:Q0.${i}`, `H1:${t}`));
+  return b.wire('H1:PB', 'A1:I0.0').build();
+}
+
+/**
+ * Butonlu yaya geçidi: araçlar normalde yeşil. Buton talebi hafızaya alınır, BEKLEYİN yanar.
+ * Araç yeşili en az 5 s sürdüyse: sarı 2 s → tüm kırmızı 1 s → yaya yeşil 5 s → temizleme 3 s.
+ */
+export function pedCrossingSchematic(): Schematic {
+  const prog = program(
+    net('N1', 'Araç yeşili en az 5 s', nc('%M0.1'), coil('T0', 'TON', { preset: 5000 })),
+    net('N2', 'Yaya talebi (buton)', no('%I0.0', 'PB'), coil('%M0.0', 'set')),
+    net('N3', 'Talep var ve en az yeşil doldu: geçiş başlar', series(no('%M0.0'), no('T0')), coil('%M0.1', 'set')),
+    net('N4', 'Araç sarı süresi', no('%M0.1'), coil('T1', 'TON', { preset: 2000 })),
+    net('N5', 'Tüm kırmızı', no('T1'), coil('T2', 'TON', { preset: 1000 })),
+    net('N6', 'Yaya yeşil süresi', no('T2'), coil('T3', 'TON', { preset: 5000 })),
+    net('N7', 'Temizleme: son yaya karşıya varsın', no('T3'), coil('T4', 'TON', { preset: 3000 })),
+    net('N8', 'Geçiş biter', no('T4'), coil('%M0.1', 'reset')),
+    net('N9', 'Talep karşılandı', no('T2'), coil('%M0.0', 'reset')),
+    net('N10', 'Araç kırmızı (M0.1 şartı: geçiş biterken yeşille çakışmasın)', series(no('%M0.1'), no('T1')), coil('%Q0.0')),
+    net('N11', 'Araç sarı', series(no('%M0.1'), nc('T1')), coil('%Q0.1')),
+    net('N12', 'Araç yeşil', nc('%M0.1'), coil('%Q0.2')),
+    net('N13', 'Yaya yeşil', series(no('T2'), nc('T3')), coil('%Q0.4')),
+    net('N14', 'Yaya kırmızı', nc('%Q0.4'), coil('%Q0.3')),
+    net('N15', 'BEKLEYİN', no('%M0.0'), coil('%Q0.5')),
+  );
+  const b = builder('Butonlu yaya geçidi', [{ id: 'p1', title: 'Yaya geçidi' }])
+    .add('G1', 'psu24', 40, 20)
+    .add('H1', 'pedCrossing', 360, 40)
+    .add('A1', 'plc', 60, 300, { program: prog });
+  plcPower(b);
+  supply(b, 'H1', 'L+', 'M');
+  ['R', 'Y', 'G', 'PR', 'PG', 'W'].forEach((t, i) => b.wire(`A1:Q0.${i}`, `H1:${t}`));
+  return b.wire('H1:PB', 'A1:I0.0').build();
+}

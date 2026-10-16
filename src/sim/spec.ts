@@ -26,6 +26,7 @@ export type Category =
   | 'Pnömatik'
   | 'Hidrolik'
   | 'Robotik'
+  | 'Sahneler'
   | 'Kullanıcı';
 
 export const CATEGORIES: readonly Category[] = [
@@ -44,6 +45,7 @@ export const CATEGORIES: readonly Category[] = [
   'Pnömatik',
   'Hidrolik',
   'Robotik',
+  'Sahneler',
   'Kullanıcı',
 ];
 

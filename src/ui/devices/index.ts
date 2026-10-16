@@ -30,6 +30,7 @@ import {
   pressureTxView,
   tempTxView,
 } from './sensors';
+import { pedCrossingView, trafficJunctionView, trafficLightView } from './traffic';
 import type { AnyView } from './types';
 
 export const VIEWS: AnyView[] = [
@@ -68,6 +69,9 @@ export const VIEWS: AnyView[] = [
   robotArmView,
   elevatorView,
   garageDoorView,
+  trafficLightView,
+  pedCrossingView,
+  trafficJunctionView,
 ];
 
 const BY_TYPE = new Map(VIEWS.map((v) => [v.type, v]));

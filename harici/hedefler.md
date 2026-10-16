@@ -1,5 +1,10 @@
 # Doğal dil entegrasyonu – hedefler
 
+> **Durum (2026-10-16): beklemede.** Öncelik eğitim yolu ve canlı sahneler (`idea.md`). Eğitim
+> ürünü için en uygun AI kullanımı büyük ihtimalle bir öğretici: "senaryo neden geçmedi?"
+> sorusunu açıklamak ya da ipucu vermek. Öğrencinin yerine program yazan bir AI, öğretim hedefiyle
+> çelişir.
+
 Kullanıcı ne istediğini anlatır; AI ladder programını ve elektrik şemasını oluşturur, simülatörde
 doğrular.
 
@@ -60,15 +65,17 @@ Kullanıcı: "İki butonla motoru çalıştır-durdur, termik atınca lamba yans
    çıktısını otomatik test etmek için ideal. "AI çizdi" ile "AI çizdi ve çalıştığını kanıtladı"
    arasındaki fark bu.
 
-## 3. Önce çözülmesi gereken engeller
+## 3. Önce çözülmesi gereken engeller (v0.3–v0.4'te çözüldü)
 
-- [ ] **Program sabit** (`src/sim/programs.ts`, `DEFAULT_CONFIG`). Program şema dokümanına
-  taşınmalı; yoksa AI'nın ürettiği ladder'ı koyacak yer yok.
-- [ ] **Ladder DSL dar.** Yalnız NO/NC kontak + bobin var. Timer (TON/TOF), set/reset, sayaç
-  olmadan "5 sn sonra", "3 kez basınca" gibi yaygın istekler karşılanamaz. AI'nın tavanı DSL'in
-  tavanı.
-- [ ] **Etiketler şemaya bağlı değil.** I/O ataması için tek doğruluk kaynağı (sembol tablosu)
-  olmalı; ladder ve şema aynı tabloyu referans almalı.
+- [x] **Program sabit.** Program artık her PLC örneğinde, şema dokümanında saklanıyor
+  (`ComponentInstance.program`).
+- [x] **Ladder DSL dar.** P/N kontak, karşılaştırma, set/reset, TON/TOF/TP/TONR, CTU/CTD/CTUD,
+  MOVE/ADD/SUB/MUL/DIV, SCALE ve PID var (`src/sim/instructions.ts`, `src/sim/boxes.ts`).
+- [x] **Etiketler şemaya bağlı değil.** Sembol tablosu kablolamadan üretiliyor
+  (`src/sim/symbolTable.ts`).
+
+Kalan engel ürün kararı: ilk sürüm backend'siz (`idea.md` › Kararlar), LLM ise bir proxy
+gerektiriyor (bkz. 4. bölüm).
 
 ## 4. LLM nerede çalışacak?
 
@@ -81,7 +88,7 @@ Uygulama saf Vite/React SPA; API anahtarı tarayıcıya konamaz.
 
 ## 5. Yol haritası
 
-1. [ ] **v0.3 ön hazırlık:** program dokümana taşınır, sembol tablosu, DSL'e TON + SR.
+1. [x] **v0.3 ön hazırlık:** program dokümana taşınır, sembol tablosu, DSL'e TON + SR.
 2. [ ] **Yalnız ladder:** metin → `LadderProgram` JSON → `compileProgram` doğrulama → onay ekranı.
 3. [ ] **Test döngüsü:** AI senaryo üretir, simülatör koşar, hatalar geri döner.
 4. [ ] **Elektrik tarafı:** önce makro kütüphanesi + auto-layout, sonra AI ile makro seçimi.

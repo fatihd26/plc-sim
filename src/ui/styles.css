@@ -451,6 +451,42 @@ details.faults .count { margin-left: 6px; }
 :is(.canvas .symbol, .preview) .obstacle { fill: #f59e0b; stroke: #92400e; stroke-width: 1; }
 :is(.canvas .symbol, .preview) .tripped > .frame, :is(.canvas .symbol, .preview) .robot.tripped .frame { stroke: var(--fault); }
 
+/* Sahneler: trafik ışığı */
+:is(.canvas .symbol, .preview) .tl-card { fill: var(--sym-fill); stroke-width: 1; }
+.mode-sim .canvas .symbol .tl-card.on { stroke: var(--on); }
+:is(.canvas .symbol, .preview) .tl-head { fill: #1f2937; stroke: var(--sym); stroke-width: 1.2; }
+:is(.canvas .symbol, .preview) .tl-pole { stroke: var(--sym-faint); stroke-width: 4; }
+:is(.canvas .symbol, .preview) .tl-lamp { stroke: #111827; stroke-width: 1; }
+:is(.canvas .symbol, .preview) .tl-lamp.red { fill: #7f1d1d; }
+:is(.canvas .symbol, .preview) .tl-lamp.yellow { fill: #713f12; }
+:is(.canvas .symbol, .preview) .tl-lamp.green { fill: #14532d; }
+:is(.canvas .symbol, .preview) .tl-lamp.red.on { fill: #ef4444; filter: drop-shadow(0 0 6px #ef4444); }
+:is(.canvas .symbol, .preview) .tl-lamp.yellow.on { fill: #facc15; filter: drop-shadow(0 0 6px #facc15); }
+:is(.canvas .symbol, .preview) .tl-lamp.green.on { fill: #22c55e; filter: drop-shadow(0 0 6px #22c55e); }
+:is(.canvas .symbol, .preview) .road { fill: #4b5563; stroke: none; }
+:is(.canvas .symbol, .preview) .lane { stroke: #e5e7eb; stroke-width: 1.2; stroke-dasharray: 8 6; }
+:is(.canvas .symbol, .preview) .stop-line { stroke: #f9fafb; stroke-width: 3; stroke-linecap: butt; }
+:is(.canvas .symbol, .preview) .car .car-body { fill: #3b82f6; stroke: #1e3a8a; stroke-width: 1; }
+:is(.canvas .symbol, .preview) .car.stopped .car-body { fill: #f97316; stroke: #9a3412; }
+:is(.canvas .symbol, .preview) .car .windshield { fill: #dbeafe; stroke: none; }
+:is(.canvas .symbol, .preview) .tl-alarm { fill: var(--fault-soft); fill-opacity: .5; stroke: var(--fault); stroke-width: 2; }
+
+:is(.canvas .symbol, .preview) .tl-card.frame-only { fill: none; }
+:is(.canvas .symbol, .preview) .tl-box { fill: #4b5563; stroke: none; }
+:is(.canvas .symbol, .preview) .tl-box.crash { fill: var(--fault); fill-opacity: .55; }
+:is(.canvas .symbol, .preview) .zebra { fill: #f9fafb; stroke: none; }
+:is(.canvas .symbol, .preview) .zebra.danger { fill: var(--fault); }
+:is(.canvas .symbol, .preview) .lane-arrow { stroke: #e5e7eb; stroke-width: 1.4; fill: none; }
+:is(.canvas .symbol, .preview) .ped { fill: #a855f7; stroke: #581c87; stroke-width: 1; }
+:is(.canvas .symbol, .preview) .ped.walking { fill: #22c55e; stroke: #14532d; }
+:is(.canvas .symbol, .preview) .ped-button { fill: var(--sym-fill); stroke: var(--sym); stroke-width: 1; }
+:is(.canvas .symbol, .preview) .ped-button.on { fill: var(--accent); stroke: var(--accent); }
+
+:is(.canvas .symbol, .preview) .sidewalk { fill: #d1d5db; stroke: none; }
+:is(.canvas .symbol, .preview) .ped-box { fill: #facc15; stroke: #a16207; stroke-width: 1; }
+:is(.canvas .symbol, .preview) .wait-lamp { fill: #3f3f46; stroke: none; }
+:is(.canvas .symbol, .preview) .wait-lamp.on { fill: #fb923c; filter: drop-shadow(0 0 4px #fb923c); }
+
 /* Kablolar: hortum, hidrolik hat, analog sinyal, kopuk kablo */
 .canvas .wire.hose .wire-line { stroke: var(--pn); stroke-dasharray: 6 3; }
 .canvas .wire.hose.hydraulic .wire-line { stroke: var(--hy); stroke-width: 2.5; stroke-dasharray: none; }
