@@ -487,6 +487,19 @@ details.faults .count { margin-left: 6px; }
 :is(.canvas .symbol, .preview) .wait-lamp { fill: #3f3f46; stroke: none; }
 :is(.canvas .symbol, .preview) .wait-lamp.on { fill: #fb923c; filter: drop-shadow(0 0 4px #fb923c); }
 
+:is(.canvas .symbol, .preview) .lot { fill: #e5e7eb; stroke: var(--sym-faint); stroke-width: 1; }
+:is(.canvas .symbol, .preview) .space { fill: none; stroke: #9ca3af; stroke-width: 1; stroke-dasharray: 3 2; }
+:is(.canvas .symbol, .preview) .loop { fill: none; stroke: #9ca3af; stroke-width: 1; stroke-dasharray: 3 2; }
+:is(.canvas .symbol, .preview) .loop.on { stroke: #facc15; stroke-width: 1.6; stroke-dasharray: none; }
+:is(.canvas .symbol, .preview) .arm { stroke: #ef4444; stroke-width: 5; stroke-dasharray: 6 5; stroke-linecap: butt; }
+:is(.canvas .symbol, .preview) .arm-base { stroke: #f9fafb; stroke-width: 5; }
+:is(.canvas .symbol, .preview) .arm.hit { stroke: var(--fault); filter: drop-shadow(0 0 4px var(--fault)); }
+:is(.canvas .symbol, .preview) .cabinet { fill: #facc15; stroke: #a16207; stroke-width: 1; }
+:is(.canvas .symbol, .preview) .full-sign { fill: #3f3f46; stroke: #18181b; stroke-width: 1; }
+:is(.canvas .symbol, .preview) .full-sign.on { fill: #7f1d1d; }
+:is(.canvas .symbol, .preview) .full-text { fill: #52525b; }
+:is(.canvas .symbol, .preview) .full-text.on { fill: #fecaca; filter: drop-shadow(0 0 3px #ef4444); }
+
 /* Kablolar: hortum, hidrolik hat, analog sinyal, kopuk kablo */
 .canvas .wire.hose .wire-line { stroke: var(--pn); stroke-dasharray: 6 3; }
 .canvas .wire.hose.hydraulic .wire-line { stroke: var(--hy); stroke-width: 2.5; stroke-dasharray: none; }

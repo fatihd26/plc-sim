@@ -26,6 +26,7 @@ import { furnaceModule, processTankModule } from './process';
 import { pumpModule } from './pump';
 import { elevatorModule, garageDoorModule, linearAxisModule, pickPlaceModule, robotArmModule } from './robotics';
 import { capacitiveModule, encoderModule, inductiveModule, limitSwitchModule, photoModule } from './sensors';
+import { parkingBarrierModule } from './parking';
 import { pedCrossingModule, trafficJunctionModule, trafficLightModule } from './traffic';
 import type { DeviceModule } from './types';
 
@@ -76,6 +77,7 @@ export const MODULES = [
   trafficLightModule,
   pedCrossingModule,
   trafficJunctionModule,
+  parkingBarrierModule,
 ] as const;
 
 export type AnyModule = (typeof MODULES)[number];

@@ -471,6 +471,13 @@ export const LEVELS: Level[] = [
         title: 'Kavşak ve yaya geçidi',
         hint: 'Trafik ışığındaki TON zincirini altı adıma uzat (T0..T5); T0\'ın önüne T5\'in NC kontağını koy. Lambaları adımlardan türet: A kırmızı = T1, B yeşil = T2 ve T3 değil. Yaya için iki hafıza biti kullan: buton %M0.0\'ı set etsin; tüm kırmızıda (T1 ve T2 değil) talep varsa %M0.1 set olsun ve %M0.0 sıfırlansın. Yaya yeşil = %M0.1 ve B yeşil adımı; T3 bitince %M0.1\'i sıfırla.',
       },
+      {
+        kind: 'task',
+        id: 'o-g-otopark',
+        taskId: 'task-parking',
+        title: 'Otopark bariyeri',
+        hint: 'Açma ve kapatma için iki hafıza biti kullan: ENT ve TK birlikte (ve C0 dolu değilse) %M0.0\'ı set etsin, LSO sıfırlasın; SAFE\'in düşen kenarı (N kontağı) %M0.1\'i set etsin, LSC sıfırlasın. DN rung\'ına SAFE\'in NC kontağını koy: kol altında araç varken kol inmez. Sayıcı için CTUD: rung girişi SAFE\'in düşen kenarı, CD girişi %I0.5, ön ayar 4; C0 kontağı DOLU levhasını yaksın.',
+      },
       { kind: 'soon', id: 'o-kilit', title: 'Kilitlemeler ve emniyet (acil stop)', what: 'ders' },
       { kind: 'soon', id: 'o-g-pnomatik', title: 'Pnömatik A+ B+ A− B− sırası', what: 'görev' },
       { kind: 'soon', id: 'o-sensor', title: 'Limit switch ve konum sensörleri', what: 'ders' },

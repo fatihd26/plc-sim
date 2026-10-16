@@ -13,6 +13,7 @@ import {
   positioningSchematic,
   robotCellSchematic,
   starDeltaSchematic,
+  parkingBarrierSchematic,
   pedCrossingSchematic,
   trafficJunctionSchematic,
   trafficLightSchematic,
@@ -731,6 +732,14 @@ export const EXAMPLES: Example[] = [
     description:
       'Altı TON\'luk zincir A ve B yollarına sırayla yol verir, aralarda 1 s tüm kırmızı bırakır. Yaya butonu talebi hafızaya alınır ve yaya B yeşiliyle birlikte geçer. Kavşağa tıklayınca yaya gelir. Alıştırma: B yolunda araç yoksa B fazını atlayın (yan yol sensörü yerine bekleyen araç sayısını düşünün).',
     build: trafficJunctionSchematic,
+  },
+  {
+    id: 'parking-barrier',
+    group: 'Sahneler',
+    title: 'Otopark bariyeri: sayıcı ve emniyet',
+    description:
+      'Araç loop’tayken sürücü bilete basar, yer varsa kol kalkar; araç kol altından çıkınca kol iner, kol altında araç varken asla inmez. CTUD içerideki aracı sayar, 4’te DOLU yanar ve gelen araçlar geri döner. Girişe tıklayınca araç gelir. Alıştırma: kol 10 s açık kalır da araç geçmezse kendiliğinden kapansın.',
+    build: parkingBarrierSchematic,
   },
   {
     id: 'troubleshoot',

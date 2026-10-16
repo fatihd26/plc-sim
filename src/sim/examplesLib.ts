@@ -1,7 +1,7 @@
 // Bileşen kütüphanesinin örnek projeleri: analog/PID, proses, sürücüler, akışkan gücü, robotik
 // ve arıza bulma. Her örnek çalışan bir PLC programıyla gelir; açıklamada bir alıştırma önerilir.
 
-import { always, box, builder, cmp, coil, nc, net, no, parallel, program, series } from './build';
+import { always, box, builder, cmp, coil, nc, neg, net, no, parallel, program, series } from './build';
 import type { ModbusPoll } from './modbusMaster';
 import type { Schematic } from './schematic';
 
@@ -479,4 +479,31 @@ export function pedCrossingSchematic(): Schematic {
   supply(b, 'H1', 'L+', 'M');
   ['R', 'Y', 'G', 'PR', 'PG', 'W'].forEach((t, i) => b.wire(`A1:Q0.${i}`, `H1:${t}`));
   return b.wire('H1:PB', 'A1:I0.0').build();
+}
+
+/**
+ * Otopark bariyeri: araç loop'tayken bilete basılırsa ve yer varsa kol açılır; araç kol altından
+ * çıkınca kapanır (kol altında araç varken asla). CTUD içerideki aracı sayar, dolunca DOLU yanar.
+ */
+export function parkingBarrierSchematic(): Schematic {
+  const prog = program(
+    net('N1', 'Sayaç: kol altından geçen +1, çıkış loop’u −1', neg('%I0.2', 'SAFE'), coil('C0', 'CTUD', { preset: 4, down: '%I0.5' })),
+    net('N2', 'DOLU levhası', no('C0'), coil('%Q0.2')),
+    net('N3', 'Araç loop’ta + bilet + yer var → aç', series(no('%I0.0', 'ENT'), no('%I0.1', 'TK'), nc('C0')), coil('%M0.0', 'set')),
+    net('N4', 'Açma isteği kapatmayı iptal eder', no('%M0.0'), coil('%M0.1', 'reset')),
+    net('N5', 'Tam açık: açma biter', no('%I0.3', 'LSO'), coil('%M0.0', 'reset')),
+    net('N6', 'Kolu kaldır', series(no('%M0.0'), nc('%I0.3', 'LSO'), nc('%Q0.1')), coil('%Q0.0')),
+    net('N7', 'Araç kol altından çıktı → kapat', neg('%I0.2', 'SAFE'), coil('%M0.1', 'set')),
+    net('N8', 'Kapalı: kapatma biter', no('%I0.4', 'LSC'), coil('%M0.1', 'reset')),
+    net('N9', 'Kolu indir (kol altında araç varken asla)', series(no('%M0.1'), nc('%M0.0'), nc('%I0.4', 'LSC'), nc('%I0.2', 'SAFE')), coil('%Q0.1')),
+  );
+  const b = builder('Otopark bariyeri: sayıcı ve emniyet', [{ id: 'p1', title: 'Otopark girişi' }])
+    .add('G1', 'psu24', 40, 20)
+    .add('M1', 'parkingBarrier', 360, 40)
+    .add('A1', 'plc', 60, 300, { program: prog });
+  plcPower(b);
+  supply(b, 'M1', 'L+', 'M');
+  ['UP', 'DN', 'FULL'].forEach((t, i) => b.wire(`A1:Q0.${i}`, `M1:${t}`));
+  ['ENT', 'TK', 'SAFE', 'LSO', 'LSC', 'EX'].forEach((t, i) => b.wire(`M1:${t}`, `A1:I0.${i}`));
+  return b.build();
 }
